@@ -1,0 +1,2 @@
+# Transcrição automática local (opcional; usa CTranslate2)
+faster-whisper>=1.0
