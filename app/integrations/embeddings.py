@@ -1,22 +1,28 @@
-"""Provedores de embeddings: Ollama (produção) e Hash determinístico (testes/modo offline)."""
+"""Provedores de embeddings: cliente remoto em lotes e Hash determinístico (testes/modo offline)."""
 
 from __future__ import annotations
 
 import hashlib
 import math
-from typing import Protocol
+from typing import Any, Protocol
 
 from app.domain.text import normalize
 
 
 class Embedder(Protocol):
     def embed(self, texts: list[str]) -> list[list[float]]: ...
+    def health(self) -> dict[str, Any]: ...
 
 
-class OllamaEmbedder:
-    """Embeddings via Ollama (`/api/embed`) em lotes."""
+class EmbeddingClient(Protocol):
+    def embed(self, texts: list[str]) -> list[list[float]]: ...
+    def embedding_health(self) -> dict[str, Any]: ...
 
-    def __init__(self, client, batch_size: int = 32) -> None:  # client: OllamaClient
+
+class RemoteEmbedder:
+    """Envia os textos em lotes a um adaptador de provedor (Ollama, compatível com OpenAI)."""
+
+    def __init__(self, client: EmbeddingClient, batch_size: int = 32) -> None:
         self.client = client
         self.batch_size = batch_size
 
@@ -26,9 +32,12 @@ class OllamaEmbedder:
             vectors.extend(self.client.embed(texts[i : i + self.batch_size]))
         return vectors
 
+    def health(self) -> dict[str, Any]:
+        return self.client.embedding_health()
+
 
 class HashEmbedder:
-    """Bag-of-words com hashing (sem rede). Útil para testes e para rodar sem Ollama de embeddings."""
+    """Bag-of-words com hashing (sem rede). Útil para testes e para rodar sem modelo de embeddings."""
 
     def __init__(self, dimensions: int = 256) -> None:
         self.dimensions = dimensions
@@ -43,3 +52,6 @@ class HashEmbedder:
 
     def embed(self, texts: list[str]) -> list[list[float]]:
         return [self._vector(t) for t in texts]
+
+    def health(self) -> dict[str, Any]:
+        return {"status": "ok", "provedor": "hash", "modelo": "hash"}

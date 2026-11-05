@@ -94,8 +94,10 @@ Status: ✅ concluída nesta versão · ⏳ depende de ambiente do usuário (ver
 ### T11.1 OpenAPI completo ✅ — summaries, descriptions, exemplos, respostas de erro em todos os routers.
 ### T11.2 README e docs revisados ✅ — instalação do zero, Ollama, Whisper, exemplos `curl`.
 ### T11.3 Preparação para frontend em projeto separado ✅ — `app/main.py`, `tests/test_api.py`, `docs/ux-guidelines.md` §8. Aceite: erro 500 com CORS e JSON; testes de CORS; guia de integração. Dep.: T11.1
+### T11.4 Arquitetura agnóstica de LLM ✅ — `app/integrations/{llm,ollama,openai_compatible,embeddings,vector_store}.py`, `app/core/{config,container}.py`, `app/services/indexing.py`, `app/workers/reindex.py`. Aceite: provedores por configuração; coleção por modelo; `make reindex`; `/health` neutro. Dep.: T4.2, T4.3
 
 ## Backlog técnico (próximas versões)
+- Registrar `modelo_llm` e `versao_prompt` em versões e avaliações (exige migração do banco).
 - Fila dedicada (RQ/Arq) e recuperação de jobs interrompidos na inicialização.
 - Migrações versionadas (ex.: `yoyo-migrations`) ao migrar para PostgreSQL.
 - Autenticação JWT e escopo de projetos por usuário.

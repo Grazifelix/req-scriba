@@ -9,22 +9,31 @@ from fastapi import APIRouter, Depends
 from app import __version__
 from app.api.deps import get_container
 from app.core.container import Container
+from app.services.indexing import vector_index_health
 
 router = APIRouter(tags=["Saúde"])
 
 
-@router.get("/health", summary="Status dos componentes",
-            description="Verifica SQLite, ChromaDB, Ollama (modelos LLM e de embeddings) e o mecanismo de transcrição.")
-def health(container: Container = Depends(get_container)) -> dict[str, Any]:
+def _database_and_index_health(container: Container) -> tuple[dict[str, Any], dict[str, Any]]:
     try:
-        database = {"status": "ok" if container.db.ping() else "indisponivel"}
+        if not container.db.ping():
+            return {"status": "indisponivel"}, container.vector_store.health()
+        with container.uow() as uow:
+            return {"status": "ok"}, vector_index_health(uow, container)
     except Exception as exc:  # reporta, não derruba a verificação
-        database = {"status": "indisponivel", "detalhe": str(exc)[:200]}
-    llm_health = getattr(container.llm, "health", None)
+        return {"status": "indisponivel", "detalhe": str(exc)[:200]}, container.vector_store.health()
+
+
+@router.get("/health", summary="Status dos componentes",
+            description="Verifica SQLite, ChromaDB (e se falta reindexar), o LLM e os embeddings configurados "
+                        "(provedor e modelos) e o mecanismo de transcrição.")
+def health(container: Container = Depends(get_container)) -> dict[str, Any]:
+    database, vector_index = _database_and_index_health(container)
     components = {
         "banco_relacional": database,
-        "banco_vetorial": container.vector_store.health(),
-        "ollama": llm_health() if callable(llm_health) else {"status": "ok", "detalhe": "cliente simulado"},
+        "banco_vetorial": vector_index,
+        "llm": container.llm.health(),
+        "embeddings": container.embedder.health(),
         "transcricao": container.transcriber.health(),
     }
     overall = "ok" if all(c.get("status") == "ok" for c in components.values()) else "degradado"

@@ -7,9 +7,49 @@ import pytest
 from app.core.errors import BusinessValidationError, ConflictError, ExternalServiceError, NotFoundError
 from app.services.audios import AudioService, transcribe_audio
 from app.services.documents import DocumentService
+from app.services.indexing import reindex_all, vector_index_health
 from app.services.projects import ProjectService
 from app.services.retrieval import search
 from tests.conftest import WAV_BYTES, upload_document
+
+
+def test_reindex_restores_semantic_search_after_embedding_model_change(container, project_id, document_id):
+    with container.uow() as uow:
+        expected = search(uow, container, project_id, "boletim", 5)["itens"]
+        assert expected
+        container.vector_store.items.clear()  # coleção do novo modelo começa vazia
+        assert search(uow, container, project_id, "boletim", 5)["itens"] == []
+        assert vector_index_health(uow, container)["reindexacao_pendente"] is True
+
+    assert reindex_all(container, batch_size=1) == len(expected_chunks(container))
+
+    with container.uow() as uow:
+        assert search(uow, container, project_id, "boletim", 5)["itens"] == expected  # mesmos ids e metadados
+        assert vector_index_health(uow, container)["reindexacao_pendente"] is False
+
+
+def test_reindex_uses_the_configured_embedder(container, document_id):
+    class RecordingEmbedder:
+        def __init__(self):
+            self.texts = []
+
+        def embed(self, texts):
+            self.texts.extend(texts)
+            return [[1.0, 0.0] for _ in texts]
+
+    container.embedder = RecordingEmbedder()
+    total = reindex_all(container)
+    assert total > 0 and sorted(container.embedder.texts) == sorted(c["texto"] for c in expected_chunks(container))
+    assert all(item["embedding"] == [1.0, 0.0] for item in container.vector_store.items.values())
+
+
+def test_reindex_without_chunks_does_nothing(container):
+    assert reindex_all(container) == 0
+
+
+def expected_chunks(container):
+    with container.uow() as uow:
+        return uow.chunks.list_all()
 
 
 def test_upload_audio_associates_project_and_starts_pending(container, project_id):

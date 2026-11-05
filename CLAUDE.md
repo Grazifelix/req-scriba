@@ -29,8 +29,8 @@ As 20 user stories (US-01 a US-20) estão em `docs/prd.md` e são a fonte de ver
 | API | FastAPI (respostas sempre JSON) |
 | Persistência relacional | SQLite via `sqlite3` da biblioteca padrão (repositórios próprios) |
 | Banco vetorial | ChromaDB (`PersistentClient`, distância cosseno) |
-| LLM | Qwen 3.5 4B (`qwen3.5:4b`) no Ollama, chamado com `requests` em `/api/chat` |
-| Embeddings | `bge-m3` no Ollama (`/api/embed`) — multilíngue, bom para PT-BR |
+| LLM | Agnóstico de provedor (`ollama` ou `openai_compatible`, via `requests`). Padrão: Qwen 3.5 4B (`qwen3.5:4b`) no Ollama |
+| Embeddings | Agnóstico de provedor. Padrão: `bge-m3` no Ollama — multilíngue, bom para PT-BR |
 | Chunking | Divisão recursiva por fronteiras estruturais (documentos) e janelas de segmentos (transcrições) |
 | Transcrição | `faster-whisper` (opcional, `requirements-asr.txt`) |
 | Extração de documentos | `pypdf` (PDF), `python-docx` (DOCX), TXT/MD nativo |
@@ -51,8 +51,9 @@ As 20 user stories (US-01 a US-20) estão em `docs/prd.md` e são a fonte de ver
   devolver JSON. **Nenhuma regra de negócio em router.**
 - Serviços não importam FastAPI. Eles lançam exceções de `app/core/errors.py`.
 - Repositórios só fazem SQL. Nada de regra de negócio em SQL.
-- Integrações externas (Ollama, ChromaDB, Whisper) ficam atrás de protocolos em
+- Integrações externas (LLM, embeddings, ChromaDB, Whisper) ficam atrás de protocolos em
   `app/integrations/` e são injetadas pelo `Container` (`app/core/container.py`). Testes usam fakes.
+- Serviços nunca conhecem o provedor de LLM. Detalhes de um provedor (ex.: `think`, `num_ctx`) ficam só no adaptador.
 - O LLM **nunca** escreve direto em uma HU aprovada. Toda saída da IA é sugestão até um humano aprovar.
 - O LLM cita fontes por rótulo (`F1`, `F2`…); o texto da evidência sempre vem do banco, nunca do LLM.
 - Nada de suposição apresentada como fato: elementos ausentes viram `informacoes_ausentes`.
@@ -114,6 +115,7 @@ make install        # dependências de runtime + dev
 make install-asr    # faster-whisper (transcrição local)
 make run            # uvicorn com reload em http://localhost:8000
 make test           # pytest
+make reindex        # reconstrói o índice vetorial (com a API parada) ao trocar o modelo de embeddings
 ollama pull qwen3.5:4b && ollama pull bge-m3
 ```
 

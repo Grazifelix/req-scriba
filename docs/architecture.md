@@ -2,7 +2,7 @@
 
 ## 1. Visão da arquitetura
 
-Monólito modular em camadas, 100% local, orientado a um fluxo Human-in-the-Loop:
+Monólito modular em camadas, local por padrão, orientado a um fluxo Human-in-the-Loop:
 
 ```
            ┌───────── Clientes (frontend em projeto separado, Postman, scripts) ─────────┐
@@ -13,10 +13,11 @@ Monólito modular em camadas, 100% local, orientado a um fluxo Human-in-the-Loop
 │ projects · audios · documents · indexing · retrieval · generation · stories · versioning │
 │ evidence · quality · questions · updates · jobs · presenters                              │
 ├──────────────── domain (puro) ───────────────┬──────────── integrations ─────────────────┤
-│ qus · story_format · text · chunking · enums │ ollama · embeddings · vector_store         │
-│                                              │ transcriber · extractors · storage          │
+│ qus · story_format · text · chunking · enums │ llm · ollama · openai_compatible            │
+│                                              │ embeddings · vector_store · transcriber     │
+│                                              │ extractors · storage                        │
 ├──────────────── repositories (SQL) ──────────┼─────────────────────────────────────────────┤
-│ SQLite (data/reqscriba.db)                   │ ChromaDB (data/chroma) · Ollama · disco     │
+│ SQLite (data/reqscriba.db)                   │ ChromaDB (data/chroma) · provedor LLM · disco │
 └──────────────────────────────────────────────┴─────────────────────────────────────────────┘
   workers/tasks.py — tarefas de background (BackgroundTasks) com UnitOfWork própria
 ```
@@ -49,8 +50,9 @@ classDiagram
 
     %% ---------- core ----------
     class Settings {
-        +ollama_url
+        +llm_provider
         +llm_model
+        +embeddings_provider
         +embedding_model
         +whisper_model
         +db_path()
@@ -118,10 +120,12 @@ classDiagram
     class LLMClient {
         <<protocol>>
         +generate_json(system, prompt) dict
+        +health()
     }
     class Embedder {
         <<protocol>>
         +embed(texts) list
+        +health()
     }
     class VectorStore {
         <<protocol>>
@@ -140,6 +144,13 @@ classDiagram
         +generate_json()
         +embed()
         +health()
+        +embedding_health()
+    }
+    class OpenAICompatibleClient {
+        +generate_json()
+        +embed()
+        +health()
+        +embedding_health()
     }
     class FileStorage {
         +save()
@@ -147,9 +158,11 @@ classDiagram
         +remove()
     }
     LLMClient <|.. OllamaClient
-    Embedder <|.. OllamaEmbedder
+    LLMClient <|.. OpenAICompatibleClient
+    Embedder <|.. RemoteEmbedder
     Embedder <|.. HashEmbedder
-    OllamaEmbedder --> OllamaClient : /api/embed (bge-m3)
+    RemoteEmbedder --> OllamaClient : /api/embed
+    RemoteEmbedder --> OpenAICompatibleClient : /embeddings
     VectorStore <|.. ChromaVectorStore
     VectorStore <|.. InMemoryVectorStore
     Transcriber <|.. FasterWhisperTranscriber
@@ -356,9 +369,11 @@ aprova/edita/rejeita → aplicação gera nova versão + evidências `atualizaca
 | D13 | Decodificação de áudio própria (`decode_audio` em `integrations/transcriber.py`) | O `faster-whisper` 1.2.1 decodifica com `av.open(..., metadata_errors="ignore")`, argumento removido no PyAV recente (18+), e toda transcrição falha. Decodificamos com PyAV para float32 mono 16 kHz e passamos o array ao modelo: funciona com qualquer versão do PyAV, sem fixar dependência. |
 | D14 | LLM `qwen3.5:4b` com `think: false` fixo no payload de `/api/chat` | O modelo vem com *thinking* ligado por padrão; em teste local com `format: json`, gerou 1022 tokens com ele e 66 sem, para um JSON equivalente. Nenhum fluxo usa o raciocínio, e o volume em lotes arriscaria estourar timeout e `num_ctx`. Sem variável de ambiente nova (opção mais simples); `think: false` é aceito também pelo `llama3.2:3b`, então o rollback é só trocar `REQSCRIBA_LLM_MODEL`. |
 | D15 | Frontend em projeto separado: URLs `url_*` relativas e erro 500 tratado dentro do CORS | O cliente prefixa as URLs com a origem da API (`docs/ux-guidelines.md` §8), a opção mais simples, sem nova variável de ambiente. O handler de `Exception` roda no `ServerErrorMiddleware`, fora do `CORSMiddleware`; um middleware interno gera o 500 para que ele tenha cabeçalhos CORS, senão o navegador esconderia o erro do frontend. |
+| D16 | Agnóstico de LLM: protocolos + adaptadores próprios com `requests` (`ollama` e `openai_compatible`), sem SDKs nem LiteLLM | Os serviços só conhecem `LLMClient` e `Embedder`. Um único adaptador compatível com OpenAI cobre vários servidores locais e em nuvem, sem dependência nova. LLM e embeddings são escolhidos separadamente, e o Ollama continua como padrão. Provedores com API própria entram como novo adaptador, em `_build_client` (`core/container.py`). |
+| D17 | Uma coleção do Chroma por modelo de embeddings + `make reindex` | Vetores de modelos diferentes não são comparáveis: misturá-los causa erro de dimensão ou, pior, busca ruim sem aviso. Coleções separadas impedem a mistura, e `/health` sinaliza trechos sem vetor. Coleções antigas ficam em disco, o que permite voltar ao modelo anterior sem recalcular (apenas fontes novas ficariam de fora). |
 
 **Dependências e justificativas:** `fastapi`/`uvicorn` (API), `python-multipart` (upload),
-`requests` (Ollama, exigido), `chromadb` (vetores, exigido), `pypdf` e `python-docx` (extração
+`requests` (provedores de LLM e embeddings, exigido), `chromadb` (vetores, exigido), `pypdf` e `python-docx` (extração
 leve, puro Python), `python-dotenv` (carregar `.env`), `faster-whisper` (opcional), `pytest`/`httpx` (dev).
 
 ## 6. Trade-offs
@@ -380,7 +395,7 @@ Cabeçalho opcional `X-Usuario` (responsável pelas alterações; padrão `engen
 ### Saúde
 | Método | Rota | Descrição |
 |---|---|---|
-| GET | `/health` | Status de SQLite, ChromaDB, Ollama e ASR |
+| GET | `/health` | Status de SQLite, ChromaDB (e reindexação pendente), LLM, embeddings e ASR |
 
 ### Projetos
 | Método | Rota | Descrição |

@@ -1,7 +1,7 @@
 # Atalhos de desenvolvimento do ReqScriba
 PYTHON ?= python3
 
-.PHONY: install install-asr run test clean
+.PHONY: install install-asr run test reindex clean
 
 install:
 	$(PYTHON) -m pip install -r requirements-dev.txt
@@ -14,6 +14,9 @@ run:
 
 test:
 	$(PYTHON) -m pytest -q
+
+reindex:
+	$(PYTHON) -m app.workers.reindex
 
 clean:
 	rm -rf .pytest_cache **/__pycache__

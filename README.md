@@ -3,7 +3,7 @@
 Gerador e analisador de **Histórias de Usuário** apoiado por LLM, com arquitetura
 **Human-in-the-Loop**. Transforma gravações de reuniões de elicitação e documentos do cliente em um
 backlog rastreável, avaliado pelo framework **Quality User Story (QUS)**, e conduz rodadas
-iterativas de esclarecimento com os stakeholders. Tudo roda localmente.
+iterativas de esclarecimento com os stakeholders. Por padrão, tudo roda localmente.
 
 Este repositório contém o **backend e a API REST**. O frontend é um projeto separado, que se conecta
 por HTTP: veja o [guia de integração](docs/ux-guidelines.md#8-integração-do-frontend).
@@ -15,8 +15,8 @@ por HTTP: veja o [guia de integração](docs/ux-guidelines.md#8-integração-do-
 | API | Python 3.11+ · FastAPI (JSON) |
 | Persistência | SQLite (`sqlite3` da stdlib) |
 | Banco vetorial | ChromaDB (persistente, cosseno) |
-| LLM | Qwen 3.5 4B no Ollama, via `requests` (`/api/chat`, `format: json`, `think: false`) |
-| Embeddings | `bge-m3` no Ollama (`/api/embed`) |
+| LLM | Configurável (Ollama ou API compatível com OpenAI). Padrão: Qwen 3.5 4B no Ollama |
+| Embeddings | Configurável. Padrão: `bge-m3` no Ollama |
 | Chunking | Divisão recursiva por fronteiras estruturais (docs) · janelas de segmentos (transcrições) |
 | Transcrição | faster-whisper (opcional) |
 | Documentos | pypdf · python-docx · TXT/MD |
@@ -61,6 +61,12 @@ ollama serve          # se ainda não estiver rodando
 make run              # http://localhost:8000
 ```
 
+No Windows sem `make`:
+
+```powershell
+.venv\Scripts\python.exe -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+```
+
 - Documentação interativa: <http://localhost:8000/docs> (Swagger) e `/redoc`
 - Saúde: `GET http://localhost:8000/api/v1/health`
 
@@ -81,10 +87,40 @@ curl -s -X POST $API/historias/1/perguntas/gerar
 
 Sem modelo de embeddings? Use `REQSCRIBA_EMBEDDINGS_PROVIDER=hash` (busca semântica de menor qualidade).
 
+## Como trocar o provedor de LLM
+
+O Ollama é o padrão. Para usar qualquer servidor com API compatível com a da OpenAI, local ou em nuvem,
+configure o `.env`:
+
+```bash
+REQSCRIBA_LLM_PROVIDER=openai_compatible
+REQSCRIBA_LLM_BASE_URL=http://localhost:1234/v1
+REQSCRIBA_LLM_API_KEY=                # se o servidor exigir
+REQSCRIBA_LLM_MODEL=nome-do-modelo
+```
+
+LLM e embeddings são independentes, e os nomes dos modelos devem ser exatamente os listados pelo servidor
+em `GET {base}/models`. Confira o resultado em `GET /api/v1/health`.
+
+- **Privacidade:** com um servidor fora da sua máquina, trechos de reuniões e documentos são enviados a ele.
+- **Trocar o modelo de embeddings:** pare a API e rode `make reindex` (no Windows sem `make`:
+  `.venv\Scripts\python.exe -m app.workers.reindex`). Até lá, `/health` indica
+  `reindexacao_pendente` e a busca não encontra os trechos já existentes.
+- **Atualizando uma instalação anterior:** rode `make reindex` uma vez, pois o índice agora é separado por modelo.
+- **Qualidade:** varia por modelo. Se a capacidade for diferente, ajuste `REQSCRIBA_GENERATION_BATCH_CHARS`.
+- **Modelos com *thinking*:** prefira o provedor `ollama` para modelos do Ollama. Só ele envia `think: false`,
+  e o `qwen3.5:4b` não respondeu em 240 s pela API `/v1`, contra 36 s pela API nativa.
+
 ## Como testar
 
 ```bash
 make test             # pytest -q
+```
+
+No Windows sem `make`:
+
+```powershell
+.venv\Scripts\python.exe -m pytest -q
 ```
 
 A suíte usa fakes para LLM, ASR, embeddings e banco vetorial — não precisa de Ollama nem Whisper.
@@ -100,7 +136,7 @@ app/
 ├── db/                  # schema.sql, conexão SQLite, UnitOfWork
 ├── repositories/        # SQL por agregado
 ├── domain/              # regras puras: QUS, formato de HU, similaridade, chunking, enums
-├── integrations/        # Ollama, embeddings, ChromaDB, Whisper, extratores, armazenamento
+├── integrations/        # Provedores de LLM, embeddings, ChromaDB, Whisper, extratores, armazenamento
 ├── llm/                 # prompts e normalização de respostas
 ├── services/            # casos de uso + presenters (JSON)
 ├── workers/             # tarefas de background

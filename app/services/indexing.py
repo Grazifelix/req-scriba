@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from typing import Any
 
 from app.core.container import Container
 from app.core.time import utc_now_iso
@@ -13,6 +14,9 @@ from app.integrations.extractors import ExtractedPage
 
 logger = logging.getLogger(__name__)
 
+REINDEX_BATCH_SIZE = 64
+REINDEX_PENDING = "reindexacao_pendente"
+
 
 def vector_id(chunk_id: int) -> str:
     return f"trecho-{chunk_id}"
@@ -20,6 +24,14 @@ def vector_id(chunk_id: int) -> str:
 
 def source_key(source_type: str, source_id: int) -> str:
     return f"{source_type}:{source_id}"
+
+
+def _vector_metadata(chunk: dict) -> dict:
+    return {
+        "projeto_id": chunk["projeto_id"], "tipo_fonte": chunk["tipo_fonte"], "fonte_id": chunk["fonte_id"],
+        "fonte_chave": source_key(chunk["tipo_fonte"], chunk["fonte_id"]),
+        "nome_arquivo": chunk["nome_arquivo"], "posicao": chunk["posicao"],
+    }
 
 
 def _store_chunks(
@@ -40,17 +52,14 @@ def _store_chunks(
     now = utc_now_iso()
     ids, texts, metadatas = [], [], []
     for position, (text, location) in enumerate(pieces):
-        chunk_id = uow.chunks.insert({
+        chunk = {
             "projeto_id": project_id, "tipo_fonte": source_type, "fonte_id": source_id,
             "nome_arquivo": filename, "posicao": position, "texto": text, "localizacao": location,
             "criado_em": now,
-        })
-        ids.append(vector_id(chunk_id))
+        }
+        ids.append(vector_id(uow.chunks.insert(chunk)))
         texts.append(text)
-        metadatas.append({
-            "projeto_id": project_id, "tipo_fonte": source_type, "fonte_id": source_id,
-            "fonte_chave": source_key(source_type, source_id), "nome_arquivo": filename, "posicao": position,
-        })
+        metadatas.append(_vector_metadata(chunk))
     container.vector_store.upsert(ids, texts, embeddings, metadatas)
     logger.info("Indexados %d trechos de %s", len(ids), source_key(source_type, source_id))
     return len(ids)
@@ -88,3 +97,27 @@ def index_document(uow: UnitOfWork, container: Container, document: dict, pages:
 def remove_source_chunks(uow: UnitOfWork, container: Container, source_type: str, source_id: int) -> None:
     removed = uow.chunks.delete_by_source(source_type, source_id)
     container.vector_store.delete([vector_id(i) for i in removed])
+
+
+def reindex_all(container: Container, batch_size: int = REINDEX_BATCH_SIZE) -> int:
+    """Recalcula os vetores de todos os trechos do SQLite com o modelo atual. Retorna a quantidade."""
+    with container.uow() as uow:
+        chunks = uow.chunks.list_all()
+    for start in range(0, len(chunks), batch_size):
+        batch = chunks[start : start + batch_size]
+        texts = [chunk["texto"] for chunk in batch]
+        container.vector_store.upsert(
+            [vector_id(chunk["id"]) for chunk in batch], texts, container.embedder.embed(texts),
+            [_vector_metadata(chunk) for chunk in batch],
+        )
+        logger.info("Reindexados %d de %d trechos", start + len(batch), len(chunks))
+    return len(chunks)
+
+
+def vector_index_health(uow: UnitOfWork, container: Container) -> dict[str, Any]:
+    """Saúde do banco vetorial; sinaliza trechos do SQLite sem vetor na coleção do modelo atual."""
+    health = container.vector_store.health()
+    if health.get("status") != "ok":
+        return health
+    pending = uow.chunks.count_all() > health.get("vetores", 0)
+    return {**health, "status": REINDEX_PENDING if pending else "ok", REINDEX_PENDING: pending}

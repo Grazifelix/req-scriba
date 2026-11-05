@@ -41,7 +41,12 @@ de clientes). As práticas abaixo são obrigatórias.
 - Nenhum segredo no código; configuração via ambiente/`.env` (`.env` no `.gitignore`).
 - Logs não contêm conteúdo de transcrições, documentos ou HU — apenas ids, tamanhos e durações.
 - Mensagens de erro 500 são genéricas; o detalhe técnico fica só no log.
-- Todo processamento é local (Ollama, Whisper, SQLite, Chroma): nenhum dado sai da máquina.
+- **Por padrão, todo processamento é local** (Ollama, Whisper, SQLite, Chroma) e nenhum dado sai da máquina.
+  Com um provedor de LLM ou embeddings fora dela, trechos de transcrições e documentos **são enviados a esse
+  servidor**: confirme se o material pode ser compartilhado e quais são os termos do provedor. A API
+  registra um aviso no log ao iniciar nessa configuração.
+- O aviso não bloqueia o envio: a decisão de usar um provedor externo é de quem configura.
+- Chaves de API ficam só no ambiente/`.env`; não aparecem no `repr` de `Settings`, em logs nem em erros.
 - Excluir um projeto remove banco, vetores e arquivos associados.
 
 ## 6. Validação no cliente

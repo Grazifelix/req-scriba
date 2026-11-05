@@ -21,7 +21,7 @@ Comando: `make test` (equivale a `pytest -q`). Os testes de API e de Chroma usam
 | `test_domain_story_format.py` | montagem do template; `[A DEFINIR: …]` para elementos ausentes; parsing de texto livre "Como…, quero…, para…"; texto fora do padrão |
 | `test_domain_text_chunking.py` | normalização; similaridade; offsets dos chunks batem com o texto; sobreposição; janelas de segmentos respeitam limite e tempos |
 | `test_llm_parsing.py` | extração tolera chaves alternativas, descarta itens sem funcionalidade, rótulos inválidos; avaliação QUS preenche critérios faltantes com `Atenção`; JSON envolvido em texto/markdown |
-| `test_integrations.py` | `OllamaClient` (sucesso, JSON inválido + retentativa, timeout → `ExternalServiceError`); extratores TXT/DOCX/PDF; saneamento de nome; assinatura binária |
+| `test_integrations.py` | `OllamaClient` e `OpenAICompatibleClient` (sucesso, JSON inválido + retentativa, timeout, HTTP 401/429/500 → `ExternalServiceError`, chave fora dos erros); seleção de provedores e erros de configuração; coleções separadas por modelo; extratores TXT/DOCX/PDF; saneamento de nome; assinatura binária |
 
 ## 3. Testes de componentes (serviços)
 
@@ -32,6 +32,7 @@ Comando: `make test` (equivale a `pytest -q`). Os testes de API e de Chroma usam
 | `test_services_quality.py` | US-07 CA01–03; US-08 CA01–02 (histórico preservado, comparação resolvido/novo); US-09 CA01–03 (lacunas sem invenção); regras determinísticas (well_formed, unique, uniform) |
 | `test_services_questions.py` | US-10 CA01–04; US-11 CA01–03; US-12 CA01–03 |
 | `test_services_updates.py` | US-13 CA01–03; US-14 CA01–04 (HU aprovada intocada até aprovar); US-15 CA01–04; US-18 CA01–03 |
+| `test_services_sources.py` (reindexação) | `reindex_all` restaura a busca após troca de modelo, usa o embedder configurado e sinaliza pendência |
 | `test_schemas.py` | Contrato: todas as respostas dos serviços validam contra os `response_model` da API (roda sem FastAPI) |
 
 ## 4. Testes de integração (API)
@@ -69,8 +70,9 @@ Comando: `make test` (equivale a `pytest -q`). Os testes de API e de Chroma usam
 | Gerar HU sem fontes ou com fonte de outro projeto / não concluída | 422 |
 | Aprovar sugestão já decidida | 409 `conflito` |
 | Comparar avaliações com menos de duas | 409 |
-| Ollama fora do ar na avaliação | 502 `servico_externo` |
-| Ollama fora do ar em job | job `erro` com `mensagem_erro` |
+| Provedor de LLM fora do ar na avaliação | 502 `servico_externo` |
+| Provedor de LLM fora do ar em job | job `erro` com `mensagem_erro` |
+| Provedor desconhecido ou sem URL obrigatória | API não inicia; mensagem cita a variável `REQSCRIBA_*` |
 | Whisper não instalado | áudio `erro` com instrução de instalação; `reprocessar` disponível |
 | JSON malformado do LLM | retentativa; persistindo, erro explícito |
 
@@ -83,6 +85,13 @@ A UI fica no projeto de frontend; neste repositório, a acessibilidade é garant
 - teste automatizado verifica que todos os status expostos têm rótulo (`test_domain_text_chunking.py::test_all_status_have_labels`).
 
 ## 8. Testes manuais (roteiro com Ollama real)
+
+Repita este roteiro a cada modelo ou provedor novo: o código é agnóstico, mas a qualidade das HU e das
+avaliações muda de um modelo para outro. Para testar `openai_compatible` sem conta em nuvem, use
+`REQSCRIBA_LLM_BASE_URL=http://localhost:11434/v1` (API compatível do próprio Ollama) com um modelo sem
+*thinking*, como `llama3.2:3b`, e `REQSCRIBA_EMBEDDING_MODEL=bge-m3:latest` (o nome exato listado em `/v1/models`).
+Com `qwen3.5:4b`, a chamada por `/v1` não terminou em 240 s, contra 36 s na API nativa: o adaptador
+compatível não envia `think: false`, exclusivo do adaptador `ollama`.
 
 1. `ollama pull qwen3.5:4b && ollama pull bge-m3`; `make install-asr`; `make run`.
 2. `GET /api/v1/health` → todos os componentes `ok`.

@@ -6,7 +6,7 @@ API REST em FastAPI organizada em camadas (detalhes em `architecture.md`):
 
 ```
 HTTP ─▶ api/routers ─▶ services ─▶ repositories ─▶ SQLite
-                         │  └────▶ integrations ─▶ Ollama (LLM, embeddings) · ChromaDB · Whisper · disco
+                         │  └────▶ integrations ─▶ Provedor de LLM/embeddings · ChromaDB · Whisper · disco
                          └──────▶ domain (regras puras: QUS, formato de HU, similaridade, chunking)
 workers/tasks.py  ◀─ BackgroundTasks (transcrição, extração, geração, análise de atualização)
 ```
@@ -34,8 +34,10 @@ reqscriba/
 │   ├── domain/                   # regras puras, sem I/O
 │   │   ├── enums.py · qus.py · story_format.py · text.py · chunking.py
 │   ├── integrations/
-│   │   ├── ollama.py             # OllamaClient (requests): chat JSON + embeddings + health
-│   │   ├── embeddings.py         # OllamaEmbedder, HashEmbedder (testes/dev offline)
+│   │   ├── llm.py                # Protocolo LLMClient, retentativa de JSON, POST e saúde comuns
+│   │   ├── ollama.py             # OllamaClient: API nativa do Ollama
+│   │   ├── openai_compatible.py  # OpenAICompatibleClient: servidores compatíveis com a API da OpenAI
+│   │   ├── embeddings.py         # RemoteEmbedder (em lotes), HashEmbedder (testes/dev offline)
 │   │   ├── vector_store.py       # ChromaVectorStore, InMemoryVectorStore
 │   │   ├── transcriber.py        # FasterWhisperTranscriber
 │   │   ├── extractors.py         # PDF/DOCX/TXT/MD → páginas de texto
@@ -47,7 +49,9 @@ reqscriba/
 │   │   ├── common.py · projects.py · audios.py · documents.py · indexing.py · retrieval.py
 │   │   ├── stories.py · versioning.py · evidence.py · generation.py
 │   │   ├── quality.py · questions.py · updates.py · jobs.py · presenters.py
-│   ├── workers/tasks.py          # tarefas em background (abrem a própria UnitOfWork)
+│   ├── workers/
+│   │   ├── tasks.py              # tarefas em background (abrem a própria UnitOfWork)
+│   │   └── reindex.py            # `make reindex`: reconstrói o índice vetorial
 │   ├── schemas/                  # Pydantic: common, projects, sources, stories, workflow
 │   └── api/
 │       ├── deps.py               # injeção: container, uow, responsável
@@ -201,9 +205,11 @@ União de: critérios QUS ≠ Atende da última avaliação (`qus:<criterio>`), 
 - **SQLite** (`data/reqscriba.db`) com `PRAGMA foreign_keys=ON`, `journal_mode=WAL`, `busy_timeout=5000`.
   Uma conexão por requisição/tarefa via `UnitOfWork` (commit no sucesso, rollback em exceção).
   Schema idempotente (`CREATE TABLE IF NOT EXISTS`) aplicado na inicialização.
-- **ChromaDB** (`data/chroma/`), coleção `reqscriba_trechos`, espaço `cosine`. Os embeddings são
-  calculados pelo backend (Ollama `bge-m3`) e enviados explicitamente — a coleção não depende de
-  função de embedding interna. SQLite é a fonte de verdade; Chroma é um índice reconstruível.
+- **ChromaDB** (`data/chroma/`), uma coleção por modelo de embeddings (`reqscriba_trechos__<hash do modelo>`),
+  espaço `cosine`. Os embeddings são calculados pelo provedor configurado e enviados explicitamente — a
+  coleção não depende de função de embedding interna. SQLite é a fonte de verdade; Chroma é um índice
+  reconstruível com `make reindex` (API parada), necessário ao trocar de modelo. Enquanto houver trechos
+  sem vetor, `/health` retorna `banco_vetorial.reindexacao_pendente: true`.
 - **Arquivos** em `data/uploads/projeto_<id>/<uuid>_<nome_saneado>`.
 - Exclusão de projeto/fonte remove linhas (cascade), vetores (`where`) e arquivos.
 
@@ -214,11 +220,15 @@ União de: critérios QUS ≠ Atende da última avaliação (`qus:<criterio>`), 
   `\n\n` → `\n` → `. ` → espaço, buscando a fronteira na segunda metade da janela.
 - **Transcrições:** janelas de segmentos consecutivos até 800 caracteres, sem cortar segmentos,
   preservando `inicio_segundos`/`fim_segundos`. Reconstruídas quando um segmento é corrigido (US-03 CA03).
-- **Embeddings:** `bge-m3` via `POST /api/embed` (lotes de 32). Em testes, `HashEmbedder` determinístico.
+- **Embeddings:** `bge-m3` por padrão, via `POST /api/embed` no Ollama ou `POST {base}/embeddings` em
+  servidor compatível com OpenAI (lotes de 32). Em testes, `HashEmbedder` determinístico.
 
 ## 7. Estratégia de LLM
 
-- `POST {OLLAMA_URL}/api/chat` com `format: "json"`, `think: false`, `stream: false`, `temperature 0.1`, `num_ctx 8192`.
+- Os serviços dependem apenas do protocolo `LLMClient`. O adaptador é escolhido por `REQSCRIBA_LLM_PROVIDER`:
+  - `ollama` (padrão): `POST {URL}/api/chat` com `format: "json"`, `think: false`, `stream: false`, `temperature 0.1`, `num_ctx 8192`.
+  - `openai_compatible`: `POST {base}/chat/completions` com `response_format: {"type": "json_object"}`,
+    `temperature 0.1` e chave Bearer opcional.
 - Resposta inválida → uma nova tentativa pedindo JSON estrito → `ExternalServiceError` (HTTP 502/erro no job).
 - Fontes enviadas como blocos rotulados `[F1] (audio reuniao.mp3 00:01:02–00:01:20) texto…`. O LLM cita
   rótulos; o backend resolve rótulos → `trechos_fonte` e copia o texto para `evidencias`. Rótulos
@@ -247,7 +257,7 @@ União de: critérios QUS ≠ Atende da última avaliação (`qus:<criterio>`), 
 | `NotFoundError` | 404 | `nao_encontrado` |
 | `BusinessValidationError` | 422 | `validacao` |
 | `ConflictError` | 409 | `conflito` |
-| `ExternalServiceError` (Ollama/Chroma/ASR) | 502 | `servico_externo` |
+| `ExternalServiceError` (LLM/embeddings/Chroma/ASR) | 502 | `servico_externo` |
 | `RequestValidationError` (Pydantic) | 422 | `entrada_invalida` (detalhes por campo) |
 | `HTTPException` (404 de rota etc.) | status original | `http_<status>` |
 | Exceção não tratada | 500 | `erro_interno` (mensagem genérica; detalhe só no log) |
@@ -286,12 +296,16 @@ Fakes: `FakeLLM` (roteia pelo marcador `### TAREFA:` do prompt), `FakeTranscribe
 | Variável | Padrão |
 |---|---|
 | `REQSCRIBA_DATA_DIR` | `./data` |
-| `REQSCRIBA_OLLAMA_URL` | `http://localhost:11434` |
+| `REQSCRIBA_LLM_PROVIDER` | `ollama` (ou `openai_compatible`) |
 | `REQSCRIBA_LLM_MODEL` | `qwen3.5:4b` |
+| `REQSCRIBA_LLM_BASE_URL` | vazio; obrigatória em `openai_compatible` |
+| `REQSCRIBA_LLM_API_KEY` | vazio |
+| `REQSCRIBA_LLM_TIMEOUT` | `900` (aceita `REQSCRIBA_OLLAMA_TIMEOUT` como alternativa) |
+| `REQSCRIBA_LLM_TEMPERATURE` / `REQSCRIBA_LLM_NUM_CTX` | `0.1` / `8192` (`NUM_CTX` só no Ollama) |
+| `REQSCRIBA_OLLAMA_URL` | `http://localhost:11434` (usada se o Ollama não tiver URL própria) |
+| `REQSCRIBA_EMBEDDINGS_PROVIDER` | `ollama` (ou `openai_compatible`; `hash` para modo offline) |
 | `REQSCRIBA_EMBEDDING_MODEL` | `bge-m3` |
-| `REQSCRIBA_OLLAMA_TIMEOUT` | `900` |
-| `REQSCRIBA_LLM_TEMPERATURE` / `REQSCRIBA_LLM_NUM_CTX` | `0.1` / `8192` |
-| `REQSCRIBA_EMBEDDINGS_PROVIDER` | `ollama` (`hash` para modo offline) |
+| `REQSCRIBA_EMBEDDINGS_BASE_URL` / `REQSCRIBA_EMBEDDINGS_API_KEY` | vazios; sem URL própria e com o mesmo provedor, herdam URL e chave do LLM |
 | `REQSCRIBA_VECTOR_STORE` | `chroma` (`memory` para testes) |
 | `REQSCRIBA_WHISPER_MODEL` / `_DEVICE` / `_COMPUTE_TYPE` | `small` / `cpu` / `int8` |
 | `REQSCRIBA_TRANSCRIPTION_LANGUAGE` | `pt` |
@@ -307,4 +321,5 @@ Fakes: `FakeLLM` (roteia pelo marcador `### TAREFA:` do prompt), `FakeTranscribe
 
 Logging estruturado por módulo (`logging`), incluindo duração das chamadas ao LLM e ao ASR, ids de
 job/fonte. Conteúdo de transcrições e documentos **não** é logado (apenas tamanhos e ids).
-`GET /api/v1/health` verifica SQLite, ChromaDB, Ollama (modelos disponíveis) e disponibilidade do ASR.
+`GET /api/v1/health` verifica SQLite, ChromaDB (e reindexação pendente), LLM e embeddings (provedor e
+modelos disponíveis, em `componentes.llm` e `componentes.embeddings`) e disponibilidade do ASR.

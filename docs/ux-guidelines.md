@@ -61,7 +61,8 @@ responsivo e acessível, sem retrabalho no backend. A seção 8 reúne o necess�
 
 - Mantenha a URL da API configurável no frontend (ex.: `http://localhost:8000`). As rotas ficam em `/api/v1`.
 - `GET /openapi.json` descreve o contrato e pode gerar um cliente tipado. `GET /api/v1/health` informa
-  se SQLite, ChromaDB, Ollama e transcrição estão disponíveis.
+  se banco, índice vetorial, LLM, embeddings e transcrição estão disponíveis (`componentes.llm`,
+  `componentes.embeddings` etc.). Não dependa do nome do provedor: ele muda conforme a configuração.
 
 **CORS**
 

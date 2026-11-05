@@ -36,8 +36,18 @@ def create_project(client):
 def test_health_and_root(client):
     health = client.get(f"{API}/health").json()
     assert health["status"] == "ok" and set(health["componentes"]) == {
-        "banco_relacional", "banco_vetorial", "ollama", "transcricao"}
+        "banco_relacional", "banco_vetorial", "llm", "embeddings", "transcricao"}
+    assert health["componentes"]["llm"]["provedor"] == "fake"
+    assert health["componentes"]["embeddings"]["provedor"] == "hash"
     assert client.get("/").json()["documentacao"] == "/docs"
+
+
+def test_health_flags_pending_reindex_when_vectors_are_missing(client, container, document_id):
+    assert client.get(f"{API}/health").json()["componentes"]["banco_vetorial"]["reindexacao_pendente"] is False
+    container.vector_store.items.clear()  # equivale a trocar o modelo: coleção nova, ainda vazia
+    health = client.get(f"{API}/health").json()
+    assert health["status"] == "degradado"
+    assert health["componentes"]["banco_vetorial"]["status"] == "reindexacao_pendente"
 
 
 def test_preflight_allows_configured_origin_and_user_header(client):

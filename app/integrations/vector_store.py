@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import math
 from pathlib import Path
@@ -12,6 +13,12 @@ from app.core.errors import ExternalServiceError
 logger = logging.getLogger(__name__)
 
 COLLECTION_NAME = "reqscriba_trechos"
+
+
+def collection_name(embedding_model: str) -> str:
+    """Uma coleção por modelo: vetores de modelos diferentes não são comparáveis e nunca se misturam."""
+    digest = hashlib.sha256(embedding_model.encode("utf-8")).hexdigest()[:12]
+    return f"{COLLECTION_NAME}__{digest}"
 
 
 class VectorStore(Protocol):
@@ -31,7 +38,7 @@ def build_where(project_id: int, source_keys: list[str] | None = None) -> dict[s
 
 
 class ChromaVectorStore:
-    def __init__(self, path: Path) -> None:
+    def __init__(self, path: Path, collection: str = COLLECTION_NAME) -> None:
         try:
             import chromadb
             from chromadb.config import Settings as ChromaSettings
@@ -41,7 +48,7 @@ class ChromaVectorStore:
             path=str(path), settings=ChromaSettings(anonymized_telemetry=False)
         )
         self._collection = self._client.get_or_create_collection(
-            COLLECTION_NAME, metadata={"hnsw:space": "cosine"}, embedding_function=None
+            collection, metadata={"hnsw:space": "cosine"}, embedding_function=None
         )
 
     def upsert(self, ids, texts, embeddings, metadatas) -> None:

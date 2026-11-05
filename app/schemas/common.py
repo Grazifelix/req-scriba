@@ -39,5 +39,5 @@ ERROR_RESPONSES: dict[int | str, dict[str, Any]] = {
     404: {"model": ErrorResponse, "description": "Recurso não encontrado"},
     409: {"model": ErrorResponse, "description": "Conflito de estado"},
     422: {"model": ErrorResponse, "description": "Entrada inválida ou regra de negócio violada"},
-    502: {"model": ErrorResponse, "description": "Falha em serviço externo (Ollama, ChromaDB, ASR)"},
+    502: {"model": ErrorResponse, "description": "Falha em serviço externo (LLM, embeddings, ChromaDB, ASR)"},
 }

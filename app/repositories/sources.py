@@ -59,6 +59,12 @@ class SourceChunkRepository(BaseRepository):
             return []
         return self._select(f"id IN ({placeholders(len(ids))})", tuple(ids))
 
+    def list_all(self) -> list[dict[str, Any]]:
+        return self._select()
+
+    def count_all(self) -> int:
+        return int(self.conn.execute("SELECT COUNT(*) FROM trechos_fonte").fetchone()[0])
+
     def delete_by_source(self, source_type: str, source_id: int) -> list[int]:
         ids = [
             r[0]

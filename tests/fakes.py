@@ -74,8 +74,11 @@ class FakeLLM:
         task = re.search(r"### TAREFA: (\w+)", prompt).group(1)
         self.calls.append((task, prompt))
         if self.fail:
-            raise ExternalServiceError("Ollama indisponível (simulado).")
+            raise ExternalServiceError("LLM indisponível (simulado).")
         return self.handlers[task](prompt)
+
+    def health(self) -> dict[str, Any]:
+        return {"status": "ok", "provedor": "fake", "modelo": "fake"}
 
     def prompts_for(self, task: str) -> list[str]:
         return [p for t, p in self.calls if t == task]

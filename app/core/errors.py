@@ -38,7 +38,7 @@ class ConflictError(AppError):
 
 
 class ExternalServiceError(AppError):
-    """Falha em serviço externo (Ollama, ChromaDB, mecanismo de transcrição)."""
+    """Falha em serviço externo (LLM, embeddings, ChromaDB, mecanismo de transcrição)."""
 
     status_code = 502
     code = "servico_externo"

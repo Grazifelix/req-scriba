@@ -203,7 +203,7 @@ Como engenheiro de requisitos, quero revisar, editar, aprovar ou rejeitar HU sug
 | ID | Requisito |
 |---|---|
 | RNF01 | Todas as respostas da API em JSON (inclusive erros), documentadas em OpenAPI (`/docs`). |
-| RNF02 | Execução 100% local: SQLite, ChromaDB e Ollama na máquina do usuário; dados não saem dela. |
+| RNF02 | Execução local por padrão: SQLite, ChromaDB e Ollama na máquina do usuário; dados não saem dela, salvo se um provedor de LLM ou embeddings externo for configurado explicitamente. |
 | RNF03 | Operações longas (transcrição, extração, geração, análise) são assíncronas com estado consultável. |
 | RNF04 | Uploads: áudio até 200 MB, documento até 20 MB (configuráveis). |
 | RNF05 | Respostas de leitura em < 300 ms para projetos com até 500 HU (sem chamada ao LLM). |
