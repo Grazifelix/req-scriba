@@ -29,7 +29,7 @@ As 20 user stories (US-01 a US-20) estão em `docs/prd.md` e são a fonte de ver
 | API | FastAPI (respostas sempre JSON) |
 | Persistência relacional | SQLite via `sqlite3` da biblioteca padrão (repositórios próprios) |
 | Banco vetorial | ChromaDB (`PersistentClient`, distância cosseno) |
-| LLM | LLaMA 3.2 3B (`llama3.2:3b`) no Ollama, chamado com `requests` em `/api/chat` |
+| LLM | Qwen 3.5 4B (`qwen3.5:4b`) no Ollama, chamado com `requests` em `/api/chat` |
 | Embeddings | `bge-m3` no Ollama (`/api/embed`) — multilíngue, bom para PT-BR |
 | Chunking | Divisão recursiva por fronteiras estruturais (documentos) e janelas de segmentos (transcrições) |
 | Transcrição | `faster-whisper` (opcional, `requirements-asr.txt`) |
@@ -75,7 +75,8 @@ As 20 user stories (US-01 a US-20) estão em `docs/prd.md` e são a fonte de ver
 
 ## 8. Restrições
 
-- Sem frontend nesta versão. Sem autenticação (o cabeçalho opcional `X-Usuario` identifica o responsável).
+- Este repositório é só backend e API: o frontend é um projeto separado, que se conecta via HTTP (ver `docs/ux-guidelines.md`). Não adicione UI aqui.
+- Sem autenticação (o cabeçalho opcional `X-Usuario` identifica o responsável).
 - Sem banco externo; apenas SQLite + ChromaDB locais em `data/`.
 - Não adicione dependências pesadas. Toda nova dependência precisa de justificativa em `docs/architecture.md`.
 - Não deixe arquivos vazios, `TODO` sem tarefa correspondente ou código incompleto.
@@ -113,7 +114,7 @@ make install        # dependências de runtime + dev
 make install-asr    # faster-whisper (transcrição local)
 make run            # uvicorn com reload em http://localhost:8000
 make test           # pytest
-ollama pull llama3.2:3b && ollama pull bge-m3
+ollama pull qwen3.5:4b && ollama pull bge-m3
 ```
 
 ## 13. Critérios de qualidade

@@ -1,6 +1,6 @@
 """Leitura tolerante e normalização das respostas JSON do LLM.
 
-Modelos pequenos (LLaMA 3.2 3B) variam nomes de chaves, formatos de lista e valores. Estas funções
+Modelos pequenos (Qwen 3.5 4B) variam nomes de chaves, formatos de lista e valores. Estas funções
 convertem a saída para o contrato interno e descartam o que for inválido — nunca inventam dados.
 """
 

@@ -93,6 +93,7 @@ Status: ✅ concluída nesta versão · ⏳ depende de ambiente do usuário (ver
 
 ### T11.1 OpenAPI completo ✅ — summaries, descriptions, exemplos, respostas de erro em todos os routers.
 ### T11.2 README e docs revisados ✅ — instalação do zero, Ollama, Whisper, exemplos `curl`.
+### T11.3 Preparação para frontend em projeto separado ✅ — `app/main.py`, `tests/test_api.py`, `docs/ux-guidelines.md` §8. Aceite: erro 500 com CORS e JSON; testes de CORS; guia de integração. Dep.: T11.1
 
 ## Backlog técnico (próximas versões)
 - Fila dedicada (RQ/Arq) e recuperação de jobs interrompidos na inicialização.

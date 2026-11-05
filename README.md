@@ -5,6 +5,9 @@ Gerador e analisador de **Histórias de Usuário** apoiado por LLM, com arquitet
 backlog rastreável, avaliado pelo framework **Quality User Story (QUS)**, e conduz rodadas
 iterativas de esclarecimento com os stakeholders. Tudo roda localmente.
 
+Este repositório contém o **backend e a API REST**. O frontend é um projeto separado, que se conecta
+por HTTP: veja o [guia de integração](docs/ux-guidelines.md#8-integração-do-frontend).
+
 ## Stack
 
 | Camada | Tecnologia |
@@ -12,7 +15,7 @@ iterativas de esclarecimento com os stakeholders. Tudo roda localmente.
 | API | Python 3.11+ · FastAPI (JSON) |
 | Persistência | SQLite (`sqlite3` da stdlib) |
 | Banco vetorial | ChromaDB (persistente, cosseno) |
-| LLM | LLaMA 3.2 3B no Ollama, via `requests` (`/api/chat`, `format: json`) |
+| LLM | Qwen 3.5 4B no Ollama, via `requests` (`/api/chat`, `format: json`, `think: false`) |
 | Embeddings | `bge-m3` no Ollama (`/api/embed`) |
 | Chunking | Divisão recursiva por fronteiras estruturais (docs) · janelas de segmentos (transcrições) |
 | Transcrição | faster-whisper (opcional) |
@@ -47,7 +50,7 @@ make install          # ou: pip install -r requirements-dev.txt
 make install-asr      # opcional: transcrição local (faster-whisper)
 cp .env.example .env  # ajuste se necessário
 
-ollama pull llama3.2:3b
+ollama pull qwen3.5:4b
 ollama pull bge-m3
 ```
 
@@ -112,7 +115,6 @@ Detalhes em [`docs/architecture.md`](docs/architecture.md) e [`docs/specs.md`](d
 ## Roadmap
 
 - [x] v1 backend: US-01 a US-20, API documentada, testes
-- [ ] Frontend web responsivo e acessível (ver `docs/ux-guidelines.md`)
 - [ ] Autenticação (JWT) e papéis por projeto
 - [ ] Fila dedicada para jobs e retomada após reinício
 - [ ] Diarização de falantes e OCR de PDFs digitalizados

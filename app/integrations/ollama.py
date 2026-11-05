@@ -29,7 +29,7 @@ class OllamaClient:
         base_url: str,
         model: str,
         embedding_model: str,
-        timeout: int = 300,
+        timeout: int = 900,
         temperature: float = 0.1,
         num_ctx: int = 8192,
         session: requests.Session | None = None,
@@ -70,6 +70,7 @@ class OllamaClient:
             "messages": messages,
             "stream": False,
             "format": "json",
+            "think": False,  # modelos com raciocínio (qwen3.5) gastam muito mais tokens e tempo sem ganho aqui
             "options": {"temperature": self.temperature, "num_ctx": self.num_ctx},
         }
         started = time.perf_counter()

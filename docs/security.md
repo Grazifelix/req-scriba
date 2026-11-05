@@ -46,7 +46,7 @@ de clientes). As práticas abaixo são obrigatórias.
 
 ## 6. Validação no cliente
 
-O frontend futuro deve repetir validações básicas (extensão, tamanho, campos obrigatórios) para
+O frontend (projeto separado) deve repetir validações básicas (extensão, tamanho, campos obrigatórios) para
 feedback imediato — **mas a validação do servidor é a única confiável** e nunca deve ser relaxada.
 
 ## 7. Preparação para autenticação futura
@@ -66,7 +66,9 @@ feedback imediato — **mas a validação do servidor é a única confiável** e
 ## 9. Disponibilidade e abuso
 
 - Limites de tamanho de upload e de lote do LLM evitam exaustão de memória.
-- CORS restrito às origens configuradas.
+- CORS restrito às origens configuradas em `REQSCRIBA_CORS_ORIGINS`: liste as origens exatas do frontend,
+  sem curinga. CORS só limita navegadores e não substitui autenticação; `make run` escuta em `0.0.0.0`,
+  então a API fica acessível a outras máquinas da rede, sem controle de acesso.
 - Recomendado para uso em rede: proxy reverso com TLS e rate limiting (fora do escopo da v1).
 
 ## 10. Dependências

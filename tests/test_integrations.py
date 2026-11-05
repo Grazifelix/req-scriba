@@ -40,7 +40,7 @@ class FakeSession:
 
 
 def client(responses):
-    return OllamaClient("http://ollama:11434", "llama3.2:3b", "bge-m3", session=FakeSession(responses))
+    return OllamaClient("http://ollama:11434", "qwen3.5:4b", "bge-m3", session=FakeSession(responses))
 
 
 # -- Ollama -----------------------------------------------------------------
@@ -49,7 +49,8 @@ def test_generate_json_success_uses_json_format():
     assert c.generate_json("sys", "prompt") == {"ok": True}
     url, payload = c.session.posts[0]
     assert url.endswith("/api/chat") and payload["format"] == "json" and payload["stream"] is False
-    assert payload["model"] == "llama3.2:3b" and payload["options"]["num_ctx"] == 8192
+    assert payload["model"] == "qwen3.5:4b" and payload["options"]["num_ctx"] == 8192
+    assert payload["think"] is False
 
 
 def test_generate_json_retries_once_on_invalid_json():
@@ -83,7 +84,7 @@ def test_embed_validates_response():
 
 
 def test_health_reports_missing_models():
-    c = client([FakeResponse({"models": [{"name": "llama3.2:3b"}]})])
+    c = client([FakeResponse({"models": [{"name": "qwen3.5:4b"}]})])
     health = c.health()
     assert health["status"] == "modelos_ausentes" and health["modelos_ausentes"] == ["bge-m3"]
 

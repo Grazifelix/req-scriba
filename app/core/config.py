@@ -34,9 +34,9 @@ class Settings:
 
     data_dir: Path = field(default_factory=lambda: Path(_env("DATA_DIR", "./data")))
     ollama_url: str = field(default_factory=lambda: _env("OLLAMA_URL", "http://localhost:11434"))
-    llm_model: str = field(default_factory=lambda: _env("LLM_MODEL", "llama3.2:3b"))
+    llm_model: str = field(default_factory=lambda: _env("LLM_MODEL", "qwen3.5:4b"))
     embedding_model: str = field(default_factory=lambda: _env("EMBEDDING_MODEL", "bge-m3"))
-    ollama_timeout: int = field(default_factory=lambda: _env_int("OLLAMA_TIMEOUT", 300))
+    ollama_timeout: int = field(default_factory=lambda: _env_int("OLLAMA_TIMEOUT", 900))
     llm_temperature: float = field(default_factory=lambda: _env_float("LLM_TEMPERATURE", 0.1))
     llm_num_ctx: int = field(default_factory=lambda: _env_int("LLM_NUM_CTX", 8192))
     embeddings_provider: str = field(default_factory=lambda: _env("EMBEDDINGS_PROVIDER", "ollama"))

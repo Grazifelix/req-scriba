@@ -35,7 +35,7 @@ Requisitos que conduzem entrevistas com stakeholders.
 
 ## 5. Fora de escopo (v1)
 
-- Frontend/UI (apenas API REST documentada).
+- Frontend/UI neste repositório: o frontend é um projeto separado, que consome a API REST documentada.
 - Autenticação, autorização e multi-tenancy (preparado para o futuro, não implementado).
 - Diarização de falantes, tradução e transcrição em tempo real.
 - OCR de documentos digitalizados (PDF imagem é rejeitado com mensagem clara).
@@ -83,7 +83,7 @@ o que mudou após cada entrevista. Dor: requisitos "sem dono" e sem justificativ
 
 ## 9. Funcionalidades futuras
 
-Frontend web responsivo; autenticação (OAuth2/JWT) e papéis; diarização de falantes; OCR;
+Autenticação (OAuth2/JWT) e papéis; diarização de falantes; OCR;
 exportação (CSV, Jira); fila de tarefas dedicada (RQ/Celery) para múltiplos workers; PostgreSQL +
 Chroma server; painel de métricas da pesquisa; avaliação comparativa entre modelos LLM.
 

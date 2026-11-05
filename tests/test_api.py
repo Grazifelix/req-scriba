@@ -11,10 +11,12 @@ from app.main import create_app  # noqa: E402
 from tests.conftest import DOC_TEXT, WAV_BYTES  # noqa: E402
 
 API = "/api/v1"
+ALLOWED_ORIGIN = "http://localhost:5173"
 
 
 @pytest.fixture
 def client(container):
+    container.settings.cors_origins = [ALLOWED_ORIGIN]  # independe de um .env local
     with TestClient(create_app(container=container), raise_server_exceptions=False) as test_client:
         yield test_client
 
@@ -36,6 +38,42 @@ def test_health_and_root(client):
     assert health["status"] == "ok" and set(health["componentes"]) == {
         "banco_relacional", "banco_vetorial", "ollama", "transcricao"}
     assert client.get("/").json()["documentacao"] == "/docs"
+
+
+def test_preflight_allows_configured_origin_and_user_header(client):
+    response = client.options(f"{API}/projetos", headers={
+        "Origin": ALLOWED_ORIGIN,
+        "Access-Control-Request-Method": "POST",
+        "Access-Control-Request-Headers": "x-usuario,content-type",
+    })
+    assert response.status_code == 200
+    assert response.headers["access-control-allow-origin"] == ALLOWED_ORIGIN
+    assert "x-usuario" in response.headers["access-control-allow-headers"].lower()
+
+
+def test_unlisted_origin_receives_no_cors_header(client):
+    origin = {"Origin": "http://origem-nao-autorizada.example"}
+    assert "access-control-allow-origin" not in client.get(f"{API}/health", headers=origin).headers
+    preflight = client.options(f"{API}/projetos", headers={**origin, "Access-Control-Request-Method": "POST"})
+    assert preflight.status_code == 400 and "access-control-allow-origin" not in preflight.headers
+
+
+def test_business_error_keeps_cors_and_json_format(client):
+    response = client.get(f"{API}/projetos/999999", headers={"Origin": ALLOWED_ORIGIN})
+    assert response.headers["access-control-allow-origin"] == ALLOWED_ORIGIN
+    assert response.status_code == 404 and response.json()["erro"]["mensagem"]
+
+
+def test_unexpected_error_reaches_browser_with_cors_and_generic_json(client):
+    def explode() -> None:
+        raise RuntimeError("detalhe interno sensivel")
+
+    client.app.add_api_route("/falha-inesperada", explode)
+    response = client.get("/falha-inesperada", headers={"Origin": ALLOWED_ORIGIN})
+    assert_error(response, 500, "erro_interno")
+    assert response.headers["access-control-allow-origin"] == ALLOWED_ORIGIN
+    assert response.headers["x-content-type-options"] == "nosniff"
+    assert "sensivel" not in response.text
 
 
 def test_full_flow(client):

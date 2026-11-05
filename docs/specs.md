@@ -218,7 +218,7 @@ União de: critérios QUS ≠ Atende da última avaliação (`qus:<criterio>`), 
 
 ## 7. Estratégia de LLM
 
-- `POST {OLLAMA_URL}/api/chat` com `format: "json"`, `stream: false`, `temperature 0.1`, `num_ctx 8192`.
+- `POST {OLLAMA_URL}/api/chat` com `format: "json"`, `think: false`, `stream: false`, `temperature 0.1`, `num_ctx 8192`.
 - Resposta inválida → uma nova tentativa pedindo JSON estrito → `ExternalServiceError` (HTTP 502/erro no job).
 - Fontes enviadas como blocos rotulados `[F1] (audio reuniao.mp3 00:01:02–00:01:20) texto…`. O LLM cita
   rótulos; o backend resolve rótulos → `trechos_fonte` e copia o texto para `evidencias`. Rótulos
@@ -287,9 +287,9 @@ Fakes: `FakeLLM` (roteia pelo marcador `### TAREFA:` do prompt), `FakeTranscribe
 |---|---|
 | `REQSCRIBA_DATA_DIR` | `./data` |
 | `REQSCRIBA_OLLAMA_URL` | `http://localhost:11434` |
-| `REQSCRIBA_LLM_MODEL` | `llama3.2:3b` |
+| `REQSCRIBA_LLM_MODEL` | `qwen3.5:4b` |
 | `REQSCRIBA_EMBEDDING_MODEL` | `bge-m3` |
-| `REQSCRIBA_OLLAMA_TIMEOUT` | `300` |
+| `REQSCRIBA_OLLAMA_TIMEOUT` | `900` |
 | `REQSCRIBA_LLM_TEMPERATURE` / `REQSCRIBA_LLM_NUM_CTX` | `0.1` / `8192` |
 | `REQSCRIBA_EMBEDDINGS_PROVIDER` | `ollama` (`hash` para modo offline) |
 | `REQSCRIBA_VECTOR_STORE` | `chroma` (`memory` para testes) |

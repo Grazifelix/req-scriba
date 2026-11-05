@@ -41,6 +41,12 @@ def _error(status_code: int, code: str, message: str, details=None) -> JSONRespo
     return JSONResponse(status_code=status_code, content={"erro": {"codigo": code, "mensagem": message, "detalhes": details}})
 
 
+def _internal_error(exc: Exception) -> JSONResponse:
+    # exc_info explícito: o handler de Exception roda fora de um bloco except ativo.
+    logger.error("Erro não tratado: %s", type(exc).__name__, exc_info=exc)
+    return _error(500, "erro_interno", "Erro interno inesperado. Consulte os logs do servidor.")
+
+
 def register_error_handlers(app: FastAPI) -> None:
     @app.exception_handler(AppError)
     async def app_error_handler(_: Request, exc: AppError) -> JSONResponse:
@@ -61,8 +67,7 @@ def register_error_handlers(app: FastAPI) -> None:
 
     @app.exception_handler(Exception)
     async def unhandled_handler(_: Request, exc: Exception) -> JSONResponse:
-        logger.exception("Erro não tratado: %s", type(exc).__name__)
-        return _error(500, "erro_interno", "Erro interno inesperado. Consulte os logs do servidor.")
+        return _internal_error(exc)
 
 
 def create_app(container: Container | None = None, settings: Settings | None = None) -> FastAPI:
@@ -86,6 +91,15 @@ def create_app(container: Container | None = None, settings: Settings | None = N
     )
     if container is not None:
         app.state.container = container
+
+    # Middlewares: o último registrado é o mais externo. Este precisa ficar dentro do CORS; o handler de
+    # Exception roda fora dele, e o navegador esconderia do frontend um 500 sem cabeçalhos CORS.
+    @app.middleware("http")
+    async def unhandled_errors(request: Request, call_next):
+        try:
+            return await call_next(request)
+        except Exception as exc:
+            return _internal_error(exc)
 
     app.add_middleware(
         CORSMiddleware, allow_origins=settings.cors_origins, allow_credentials=False,

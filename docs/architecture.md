@@ -5,7 +5,7 @@
 Monólito modular em camadas, 100% local, orientado a um fluxo Human-in-the-Loop:
 
 ```
-           ┌──────────────── Cliente (futuro frontend, Postman, scripts) ────────────────┐
+           ┌───────── Clientes (frontend em projeto separado, Postman, scripts) ─────────┐
                                          │ HTTP/JSON
 ┌─────────────────────────────────────── FastAPI ─────────────────────────────────────────┐
 │  api/routers  →  schemas (Pydantic)  →  api/deps (Container, UnitOfWork, X-Usuario)       │
@@ -196,9 +196,9 @@ classDiagram
 
 ## 3. Separação entre UI, estado, domínio e persistência
 
-- **UI:** inexistente na v1. O contrato da API (OpenAPI + `docs/ux-guidelines.md`) é a "interface"
-  e foi desenhado para um frontend futuro: rótulos legíveis (`status_rotulo`), estados explícitos,
-  URLs de mídia com marcação de tempo, listas paginadas por padrão `{"itens","total"}`.
+- **UI:** fora deste repositório. O frontend é um projeto separado, em outra origem, e se conecta pelo
+  contrato da API (OpenAPI + `docs/ux-guidelines.md`): rótulos legíveis (`status_rotulo`), estados
+  explícitos, URLs de mídia com marcação de tempo, listas no padrão `{"itens","total"}`.
 - **Estado:** o estado do fluxo vive no banco, nunca em memória do processo: status de fontes,
   jobs, HU, perguntas e sugestões. Isso permite reiniciar a API sem perder nada e consultar
   progresso por polling.
@@ -345,15 +345,17 @@ aprova/edita/rejeita → aplicação gera nova versão + evidências `atualizaca
 | D2 | Código em inglês, dados em português | Elimina camadas de mapeamento; contrato JSON fiel ao vocabulário do domínio. |
 | D3 | `BackgroundTasks` do FastAPI + tabela `jobs` | Assíncrono sem broker. Estado persistido permite polling e reprocessamento. |
 | D4 | Embeddings calculados pelo backend (Ollama `bge-m3`) e enviados ao Chroma | Mantém a stack sem `sentence-transformers`/PyTorch; `bge-m3` é multilíngue (PT-BR). Configurável. |
-| D5 | LLM cita rótulos `F1..Fn`; evidência copiada do banco | Rastreabilidade confiável e sem alucinação de trechos com um modelo de 3B parâmetros. |
+| D5 | LLM cita rótulos `F1..Fn`; evidência copiada do banco | Rastreabilidade confiável e sem alucinação de trechos com um modelo pequeno (4B parâmetros). |
 | D6 | Avaliação QUS híbrida (LLM + regras determinísticas) | Critérios verificáveis (well_formed, unique, uniform) ficam estáveis; o LLM cobre os semânticos. |
 | D7 | Versões com snapshot completo + lista de evidências | Consulta de qualquer versão em O(1); rastreabilidade por versão (US-18) trivial. |
 | D8 | Evidências imutáveis | Histórico confiável; correções de fonte não reescrevem o passado. |
 | D9 | `faster-whisper` opcional | Pesado (CTranslate2); a API funciona sem ele e o áudio vai para `erro` com instrução clara. |
-| D10 | `format: "json"` + validação + 1 retentativa | LLaMA 3.2 3B às vezes foge do formato; normalização tolera variações de chave/valor. |
+| D10 | `format: "json"` + validação + 1 retentativa | Modelos pequenos às vezes fogem do formato; normalização tolera variações de chave/valor. |
 | D11 | Geração em lotes de ~6000 caracteres | Cabe no `num_ctx` 8192 do modelo junto com instruções e resposta. |
 | D12 | `X-Usuario` opcional como responsável | Atende US-19 CA03 sem autenticação e prepara a integração futura. |
 | D13 | Decodificação de áudio própria (`decode_audio` em `integrations/transcriber.py`) | O `faster-whisper` 1.2.1 decodifica com `av.open(..., metadata_errors="ignore")`, argumento removido no PyAV recente (18+), e toda transcrição falha. Decodificamos com PyAV para float32 mono 16 kHz e passamos o array ao modelo: funciona com qualquer versão do PyAV, sem fixar dependência. |
+| D14 | LLM `qwen3.5:4b` com `think: false` fixo no payload de `/api/chat` | O modelo vem com *thinking* ligado por padrão; em teste local com `format: json`, gerou 1022 tokens com ele e 66 sem, para um JSON equivalente. Nenhum fluxo usa o raciocínio, e o volume em lotes arriscaria estourar timeout e `num_ctx`. Sem variável de ambiente nova (opção mais simples); `think: false` é aceito também pelo `llama3.2:3b`, então o rollback é só trocar `REQSCRIBA_LLM_MODEL`. |
+| D15 | Frontend em projeto separado: URLs `url_*` relativas e erro 500 tratado dentro do CORS | O cliente prefixa as URLs com a origem da API (`docs/ux-guidelines.md` §8), a opção mais simples, sem nova variável de ambiente. O handler de `Exception` roda no `ServerErrorMiddleware`, fora do `CORSMiddleware`; um middleware interno gera o 500 para que ele tenha cabeçalhos CORS, senão o navegador esconderia o erro do frontend. |
 
 **Dependências e justificativas:** `fastapi`/`uvicorn` (API), `python-multipart` (upload),
 `requests` (Ollama, exigido), `chromadb` (vetores, exigido), `pypdf` e `python-docx` (extração
@@ -365,7 +367,7 @@ leve, puro Python), `python-dotenv` (carregar `.env`), `faster-whisper` (opciona
 |---|---|---|
 | SQLite | Zero configuração, arquivo único | Concorrência de escrita limitada → WAL + `busy_timeout`; migração para PostgreSQL via repositórios. |
 | BackgroundTasks | Simples, sem infraestrutura | Tarefas rodam no processo da API e se perdem se ele cair → status persistido + reprocessar. |
-| LLaMA 3.2 3B local | Privacidade, custo zero | Qualidade menor que modelos grandes → prompts curtos, JSON validado, regras determinísticas, humano no loop. |
+| Qwen 3.5 4B local | Privacidade, custo zero | Qualidade menor que modelos grandes → prompts curtos, JSON validado, regras determinísticas, humano no loop. |
 | Sem ORM | Menos abstração | Mais SQL manual → repositórios pequenos e testados. |
 | Lotes + deduplicação | Escala com o tamanho das fontes | Pode separar uma necessidade entre lotes → deduplicação por similaridade mescla. |
 | Busca textual normalizada em Python | Ignora acentos/maiúsculas (PT-BR) | Varre os segmentos de um áudio (volume pequeno); sem ranking → busca semântica separada em `/busca`. |

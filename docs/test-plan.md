@@ -43,7 +43,10 @@ Comando: `make test` (equivale a `pytest -q`). Os testes de API e de Chroma usam
   409 de conflito — todos com `{"erro": {...}}`;
 - listas no formato `{"itens","total"}`;
 - `/openapi.json` contém todas as rotas documentadas em `architecture.md`;
-- `GET /audios/{id}/arquivo` devolve o binário com `content-type` correto.
+- `GET /audios/{id}/arquivo` devolve o binário com `content-type` correto;
+- CORS para o frontend em outra origem: preflight com `X-Usuario` na origem permitida; origem fora da
+  lista sem `Access-Control-Allow-Origin`; erros 404 e 500 com cabeçalhos CORS e `{"erro": {...}}`;
+  500 sem detalhes internos.
 
 ## 5. Casos críticos
 
@@ -73,7 +76,7 @@ Comando: `make test` (equivale a `pytest -q`). Os testes de API e de Chroma usam
 
 ## 7. Testes de acessibilidade
 
-Sem UI na v1; a acessibilidade é garantida no **contrato** para o frontend futuro:
+A UI fica no projeto de frontend; neste repositório, a acessibilidade é garantida no **contrato** da API:
 - todo status possui `status_rotulo` legível em português (leitores de tela não leem `em_revisao`);
 - mensagens de erro em linguagem clara, sem jargão técnico, indicando como corrigir;
 - tempos fornecidos em segundos **e** formatados (`"00:01:02"`) para exibição;
@@ -81,7 +84,7 @@ Sem UI na v1; a acessibilidade é garantida no **contrato** para o frontend futu
 
 ## 8. Testes manuais (roteiro com Ollama real)
 
-1. `ollama pull llama3.2:3b && ollama pull bge-m3`; `make install-asr`; `make run`.
+1. `ollama pull qwen3.5:4b && ollama pull bge-m3`; `make install-asr`; `make run`.
 2. `GET /api/v1/health` → todos os componentes `ok`.
 3. Criar projeto; enviar um `.mp3` curto em PT-BR; acompanhar `status` até `concluido`.
 4. Abrir `/audios/{id}/transcricao`, buscar um termo, corrigir um segmento.
