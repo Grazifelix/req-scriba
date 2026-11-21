@@ -74,3 +74,85 @@ def test_normalize_impact_relations():
         {"relacao": "complementa", "proposta": {"funcionalidade": "x"}, "fontes": ["F1", "F5"]}, {"F1"}
     )
     assert result["fontes"] == ["F1"] and result["proposta"]["funcionalidade"] == "x"
+
+
+def test_normalize_label_keeps_context_and_candidate_prefixes():
+    assert parsing.normalize_label("[F3]") == "F3" and parsing.normalize_label("f3") == "F3"
+    assert parsing.normalize_label(3) == "F3" and parsing.normalize_label("Fonte 3") == "F3"
+    assert parsing.normalize_label("R2") == "R2"
+    assert parsing.normalize_label(4, "C") == "C4" and parsing.normalize_label("c4") == "C4"
+    assert parsing.normalize_label("sem número") is None
+
+
+def test_normalize_label_rejects_codes_that_are_not_sources():
+    # antes "FN1" virava "F1" e a história recebia como evidência um trecho sem relação com ela
+    for code in ("FN1", "RN2", "H1", "CA03"):
+        assert parsing.normalize_label(code) is None
+
+
+def test_extraction_result_reads_analysis_citation_and_set_gaps():
+    data = {
+        "analise": {
+            "sistema": "Pedidos por tablet",
+            "participantes": [{"nome": "Dina", "papel_na_reuniao": "gerente de projeto", "fontes": ["F1"]}],
+            "usuários": [{"papel": "cliente", "fontes": "F2"}, "atendente"],
+            "requisitos_negocio": [{"id": "RN1", "descricao": "reduzir a espera", "fontes": ["F2"]}],
+            "funcionalidades": [{"id": "fn 1", "usuario": "cliente", "descricao": "fazer pedidos",
+                                 "requisitos_negocio": ["RN1", "x"], "fontes": ["F2", "FN1"]}],
+            "fora_de_escopo": [{"descricao": "escolher as unidades do piloto", "motivo": "decisão de projeto"}, {}],
+        },
+        "historias": [{"id": "H1", "funcionalidade_ref": "FN1", "funcionalidade": "Fazer pedidos pelo tablet",
+                       "beneficio": "Reduzir a espera", "fontes": ["F2", "RN1"], "citacao": "pedir pelo tablet"},
+                      {"id": "H2", "funcionalidade": "PDV integrado ao pedido"}],
+        "lacunas_conjunto": [{"tipo": "Conflito", "historias": ["H1", "H2"], "descricao": "regras divergentes"},
+                             {"tipo": "fluxo_incompleto", "historias": [], "descricao": "sem história"}],
+    }
+    result = parsing.normalize_extraction_result(data, {"F1", "F2"})
+    first, second = result["historias"]
+    assert (first["ref"], first["funcionalidade_ref"], first["citacao"]) == ("H1", "FN1", "pedir pelo tablet")
+    assert first["funcionalidade"] == "fazer pedidos pelo tablet" and first["beneficio"] == "reduzir a espera"
+    assert first["fontes"] == ["F2"]
+    assert second["funcionalidade"] == "PDV integrado ao pedido"  # sigla preservada
+    assert result["lacunas"] == [{"tipo": "conflito", "historias": ["H1", "H2"], "descricao": "regras divergentes"}]
+
+    analysis = result["analise"]
+    assert analysis["sistema"] == "Pedidos por tablet"
+    items = {(i["tipo"], i["texto"]): i for i in analysis["itens"]}
+    assert items[("participante", "Dina")]["complemento"] == "gerente de projeto"
+    assert items[("usuario", "cliente")]["fontes"] == ["F2"] and ("usuario", "atendente") in items
+    functionality = items[("funcionalidade", "fazer pedidos")]
+    assert (functionality["codigo"], functionality["referencias"], functionality["fontes"]) == ("FN1", ["RN1"], ["F2"])
+    assert items[("fora_de_escopo", "escolher as unidades do piloto")]["complemento"] == "decisão de projeto"
+    assert len(analysis["itens"]) == 6  # item vazio descartado
+
+
+def test_extraction_result_accepts_old_format():
+    result = parsing.normalize_extraction_result({"historias": [{"funcionalidade": "emitir boletim"}]}, set())
+    assert result["analise"] == {"sistema": None, "itens": []} and result["lacunas"] == []
+    assert result["historias"][0]["ref"] is None and result["historias"][0]["citacao"] is None
+
+
+def test_normalize_context_requires_valid_sources():
+    data = {"perfis": [{"texto": "Coordenador acompanha notas", "fontes": ["F1"]}, {"texto": "Sem fonte"}],
+            "glossario": [{"termo": "Boletim", "definicao": "relatório bimestral", "sources": "F2"}],
+            "objetivos": ["texto solto sem fonte"]}
+    items = parsing.normalize_context(data, {"F1", "F2"})
+    assert items == [
+        {"tipo": "perfil", "texto": "Coordenador acompanha notas", "fontes": ["F1"]},
+        {"tipo": "termo", "texto": "Boletim: relatório bimestral", "fontes": ["F2"]},
+    ]
+
+
+def test_normalize_consolidation_discards_invalid_operations():
+    data = {
+        "fundir": [{"historias": ["C1", "C9"]}, ["C2", "C3"], {"historias": ["C1"]}],
+        "preencher": [
+            {"alvo": "C1", "campo": "Benefício", "de": "C2"}, {"alvo": "C1", "campo": "beneficio", "de": "C1"},
+            {"alvo": "C1", "campo": "funcionalidade", "de": "C2"}, {"alvo": "C7", "campo": "perfil", "de": "C2"},
+        ],
+        "contradicoes": [{"historias": ["C1", "C3"]}],
+    }
+    ops = parsing.normalize_consolidation(data, {"C1", "C2", "C3"})
+    assert ops["fundir"] == [{"historias": ["C2", "C3"]}]  # C9 inexistente deixa o grupo com 1 só
+    assert ops["preencher"] == [{"alvo": "C1", "campo": "beneficio", "de": "C2"}]
+    assert ops["contradicoes"][0]["historias"] == ["C1", "C3"] and ops["contradicoes"][0]["descricao"]

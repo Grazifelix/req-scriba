@@ -80,6 +80,11 @@ def test_unmatched_information_becomes_new_requirement(container, project_id, ap
     new_req = [s for s in suggestions(container, project_id) if s["tipo"] == "novo_requisito"]
     assert len(new_req) == 1 and new_req[0]["historia_id"] is None  # US-14 CA03
     with container.uow() as uow:
+        detail = UpdateService(uow).get(new_req[0]["id"])
+    source = detail["fontes_documentos"][0]  # fontes da sugestão, já formatadas para exibição
+    assert source["nome_arquivo"] == "ata2.txt" and source["trecho"] and "documento_id" in source
+    assert detail["fontes_audio"] == []
+    with container.uow() as uow:
         applied = UpdateService(uow).approve(new_req[0]["id"], "ana")
     created = story(container, applied["historia_criada_id"])
     assert created["status"] == "em_revisao" and created["fontes_documentos"][0]["origem"] == "atualizacao"

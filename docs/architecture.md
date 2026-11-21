@@ -11,7 +11,7 @@ Monólito modular em camadas, local por padrão, orientado a um fluxo Human-in-t
 │  api/routers  →  schemas (Pydantic)  →  api/deps (Container, UnitOfWork, X-Usuario)       │
 ├─────────────────────────────────────── services ────────────────────────────────────────┤
 │ projects · audios · documents · indexing · retrieval · generation · stories · versioning │
-│ evidence · quality · questions · updates · jobs · presenters                              │
+│ evidence · analysis · quality · questions · updates · jobs · presenters                   │
 ├──────────────── domain (puro) ───────────────┬──────────── integrations ─────────────────┤
 │ qus · story_format · text · chunking · enums │ llm · ollama · openai_compatible            │
 │                                              │ embeddings · vector_store · transcriber     │
@@ -91,6 +91,7 @@ classDiagram
         +projects, audios, segments, documents, chunks
         +stories, versions, evidences
         +evaluations, questions, suggestions, jobs
+        +analyses, analysis_items
         +commit()
         +rollback()
         +close()
@@ -113,7 +114,9 @@ classDiagram
     BaseRepository <|-- QuestionRepository
     BaseRepository <|-- UpdateSuggestionRepository
     BaseRepository <|-- JobRepository
-    UnitOfWork *-- BaseRepository : 12 repositórios
+    BaseRepository <|-- AnalysisRepository
+    BaseRepository <|-- AnalysisItemRepository
+    UnitOfWork *-- BaseRepository : 14 repositórios
     UnitOfWork --> Database
 
     %% ---------- integrations ----------
@@ -186,6 +189,11 @@ classDiagram
     class QuestionService
     class UpdateService
     class JobService
+    class AnalysisService
+    class AnalysisBuilder {
+        +add(analise_lote, fontes) mapa_codigos
+        +link_story(codigos, historia_id)
+    }
     class ServiceModules {
         <<módulos de funções>>
         indexing / retrieval
@@ -201,6 +209,8 @@ classDiagram
     QuestionService --> Container
     UpdateService --> Container
     JobService --> UnitOfWork
+    AnalysisService --> UnitOfWork
+    ServiceModules ..> AnalysisBuilder : generation
     AudioService ..> ServiceModules
     DocumentService ..> ServiceModules
     UpdateService ..> ServiceModules
@@ -312,6 +322,21 @@ classDiagram
         parametros
         resultado
     }
+    class Analise {
+        origem
+        sistema
+        fontes
+        revisada
+    }
+    class ItemAnalise {
+        tipo
+        codigo
+        texto
+        complemento
+        referencias
+        evidencias
+        historia_ids
+    }
 
     Projeto "1" *-- "*" Audio
     Projeto "1" *-- "*" Documento
@@ -330,6 +355,11 @@ classDiagram
     VersaoHistoria "*" ..> "*" Evidencia : evidencia_ids
     PerguntaFollowup "*" ..> "0..1" AvaliacaoQualidade
     SugestaoAtualizacao "*" ..> "0..1" Job
+    Projeto "1" *-- "*" Analise
+    Analise "1" *-- "*" ItemAnalise
+    Analise "*" ..> "0..1" Job : gerada por
+    ItemAnalise "*" ..> "*" TrechoFonte : evidências (cópia)
+    ItemAnalise "*" ..> "*" Historia : historia_ids (funcionalidade)
 ```
 
 ## 4. Fluxos principais
@@ -340,14 +370,22 @@ classDiagram
 **Correção de transcrição:** `PATCH segmento` → texto revisado salvo (original preservado) → janelas do
 áudio reconstruídas e reindexadas (o mesmo texto revisado alimenta as próximas extrações).
 
-**Geração de HU:** job → valida fontes → monta lotes (transcrição + RAG de documentos; documentos
-restantes) → LLM por lote → normalização → deduplicação → HU + evidências + versão 1 → job `concluido`.
+**Geração de HU:** job → valida fontes → lê a análise revisada mais recente do projeto (se houver) →
+**chamada única** quando as fontes cabem em `GENERATION_BATCH_CHARS` (o LLM lê tudo, monta a análise e
+escreve as HU) ou **lotes** (passada de contexto → itens `R#` → lotes com transcrição + RAG de documentos →
+LLM por lote → consolidação) → normalização (citação conferida, lacunas de conjunto viram
+`informacoes_ausentes`) → deduplicação → descarte do que já existe → HU + evidências + versão 1 → análise
+gravada (itens com evidências reais e ligação FN → HU) → job `concluido`.
+
+**Revisão da análise:** o analista edita os itens (`/analises/{id}/itens`) e marca a análise como
+`revisada` → a revisada mais recente entra nos próximos prompts de extração como contexto confirmado.
 
 **Avaliação QUS:** HU + backlog → LLM (8 individuais) + LLM (conjunto) + regras determinísticas → avaliação
 persistida (histórico) → cache de qualidade na HU.
 
 **Atualização iterativa:** job com novas fontes → para cada HU: RAG restrito às novas fontes → LLM de
-impacto → sugestões `complementa/contradiz`; trechos não citados → extração → `novo_requisito` → humano
+impacto → sugestões `complementa/contradiz`; trechos não citados → extração (com o contexto das novas
+fontes) → deduplicação → consolidação → `novo_requisito` → humano
 aprova/edita/rejeita → aplicação gera nova versão + evidências `atualizacao`.
 
 ## 5. Decisões técnicas
@@ -371,6 +409,12 @@ aprova/edita/rejeita → aplicação gera nova versão + evidências `atualizaca
 | D15 | Frontend em projeto separado: URLs `url_*` relativas e erro 500 tratado dentro do CORS | O cliente prefixa as URLs com a origem da API (`docs/ux-guidelines.md` §8), a opção mais simples, sem nova variável de ambiente. O handler de `Exception` roda no `ServerErrorMiddleware`, fora do `CORSMiddleware`; um middleware interno gera o 500 para que ele tenha cabeçalhos CORS, senão o navegador esconderia o erro do frontend. |
 | D16 | Agnóstico de LLM: protocolos + adaptadores próprios com `requests` (`ollama` e `openai_compatible`), sem SDKs nem LiteLLM | Os serviços só conhecem `LLMClient` e `Embedder`. Um único adaptador compatível com OpenAI cobre vários servidores locais e em nuvem, sem dependência nova. LLM e embeddings são escolhidos separadamente, e o Ollama continua como padrão. Provedores com API própria entram como novo adaptador, em `_build_client` (`core/container.py`). |
 | D17 | Uma coleção do Chroma por modelo de embeddings + `make reindex` | Vetores de modelos diferentes não são comparáveis: misturá-los causa erro de dimensão ou, pior, busca ruim sem aviso. Coleções separadas impedem a mistura, e `/health` sinaliza trechos sem vetor. Coleções antigas ficam em disco, o que permite voltar ao modelo anterior sem recalcular (apenas fontes novas ficariam de fora). |
+| D18 | Passada de contexto prévia com itens citáveis `R#` | Os lotes isolados perdiam perfil/benefício citados em outra parte da reunião. Um resumo livre quebraria a rastreabilidade; por isso cada item de contexto precisa citar trechos `F`, e o código resolve `R#` → trechos reais. Itens sem fonte são descartados. Map por lote (não *refine* sequencial): nenhum texto do LLM é reescrito por outra chamada, e cada lote falha isolado. |
+| D19 | Consolidação por operações aplicadas pelo código | O LLM vê só as candidatas e devolve `fundir/preencher/contradicoes` sobre rótulos `C#`, sem texto. Assim nenhum texto novo entra na HU sem fonte: preencher copia o campo literal de outra candidata junto com as evidências dela. Candidatas contraditórias nunca são fundidas (nem transitivamente). Limitação herdada: evidência é por história, não por campo. |
+| D20 | Prompt de extração 2.0: "entender antes de escrever" + modo chamada única | As HU vinham com ações de projeto, metas de negócio e participantes da reunião como perfil. O prompt pede, no próprio JSON e nesta ordem, a análise (sistema, participantes × usuários, requisitos de negócio, funcionalidades, fora de escopo) e depois as HU, com os 13 critérios QUS e exemplos curtos. Fontes vêm primeiro e instruções no final (melhor em contexto longo). Pensado para modelos maiores (ex.: Llama 4 Scout): quando as fontes cabem em `GENERATION_BATCH_CHARS`, uma chamada lê tudo, e contexto prévio e consolidação são dispensados (o modelo já viu o conjunto). O caminho em lotes continua para fontes maiores e modelos locais pequenos. Sem variável nova: basta aumentar `GENERATION_BATCH_CHARS`. |
+| D21 | Análise das fontes persistida (uma por geração), com CRUD por item | O analista precisa ver e corrigir como a IA entendeu a reunião. Uma análise por geração preserva o histórico sem mesclagem automática. Itens em tabela própria (`itens_analise`, colunas genéricas `texto`/`complemento`/`referencias`) permitem editar um item por vez. Evidências são cópias dos trechos reais (rótulos resolvidos pelo código, como em D5). Códigos RN/FN são renumerados globalmente quando há vários lotes. |
+| D22 | Análise revisada como contexto confirmado | A análise mais recente com `revisada = true` entra nos prompts de extração (geração e novas fontes) como informação confirmada por humano: papéis de usuário, requisitos de negócio e itens fora de escopo. Ela não é fonte: toda HU continua precisando de rótulos `F`. É descontada do orçamento de cada lote. |
+| D23 | Rótulos estritos e citação conferida | `normalize_label` aceitava "FN1" como "F1" (pega o número), o que daria evidência errada sem aviso. Agora só aceita número que não venha colado a letra ou dígito. Cada HU traz uma `citacao` literal, conferida (ignorando acentos e pontuação) contra o texto dos trechos citados; se não bater, vira `afirmacoes_sem_evidencia`. Lacunas de conjunto (`conflito`, `fluxo_incompleto`) viram `informacoes_ausentes` e, por isso, defeitos e perguntas de follow-up. |
 
 **Dependências e justificativas:** `fastapi`/`uvicorn` (API), `python-multipart` (upload),
 `requests` (provedores de LLM e embeddings, exigido), `chromadb` (vetores, exigido), `pypdf` e `python-docx` (extração
@@ -384,7 +428,9 @@ leve, puro Python), `python-dotenv` (carregar `.env`), `faster-whisper` (opciona
 | BackgroundTasks | Simples, sem infraestrutura | Tarefas rodam no processo da API e se perdem se ele cair → status persistido + reprocessar. |
 | Qwen 3.5 4B local | Privacidade, custo zero | Qualidade menor que modelos grandes → prompts curtos, JSON validado, regras determinísticas, humano no loop. |
 | Sem ORM | Menos abstração | Mais SQL manual → repositórios pequenos e testados. |
-| Lotes + deduplicação | Escala com o tamanho das fontes | Pode separar uma necessidade entre lotes → deduplicação por similaridade mescla. |
+| Lotes + deduplicação | Escala com o tamanho das fontes | Pode separar uma necessidade entre lotes → deduplicação por similaridade, contexto prévio e consolidação mesclam. |
+| Passadas de contexto e consolidação | Perfil/benefício completos, menos duplicatas reformuladas, contradições sinalizadas | ~1 chamada extra ao LLM por lote + 1 (ou poucas) na consolidação → geração mais lenta com modelo local; cada passada pode ser desligada por variável de ambiente. Só rodam no modo lotes. |
+| Chamada única com prompt longo | O modelo vê a reunião inteira e aplica os critérios de conjunto | Exige modelo com contexto grande; com modelo pequeno, `GENERATION_BATCH_CHARS` baixo mantém o modo lotes. Resposta maior (análise + HU) → atenção ao limite de saída do provedor. |
 | Busca textual normalizada em Python | Ignora acentos/maiúsculas (PT-BR) | Varre os segmentos de um áudio (volume pequeno); sem ranking → busca semântica separada em `/busca`. |
 
 ## 7. API
@@ -433,6 +479,18 @@ Cabeçalho opcional `X-Usuario` (responsável pelas alterações; padrão `engen
 | Método | Rota | Descrição |
 |---|---|---|
 | GET | `/projetos/{projeto_id}/busca?termo=&limite=` | RAG sobre trechos de áudios e documentos |
+
+### Análises das fontes
+| Método | Rota | Descrição |
+|---|---|---|
+| GET | `/projetos/{projeto_id}/analises` | Listar análises (uma por geração, mais recente primeiro) |
+| POST | `/projetos/{projeto_id}/analises` | Criar análise manualmente (com itens opcionais) |
+| GET | `/analises/{analise_id}` | Detalhe: sistema, fontes, totais e itens com evidências |
+| PATCH | `/analises/{analise_id}` | Editar `sistema` ou marcar `revisada` (passa a orientar as próximas gerações) |
+| DELETE | `/analises/{analise_id}` | Excluir análise e itens (HU não são afetadas) |
+| POST | `/analises/{analise_id}/itens` | Adicionar item (RN/FN recebem código automático) |
+| PATCH | `/analises/{analise_id}/itens/{item_id}` | Editar texto, complemento, referências ou trechos |
+| DELETE | `/analises/{analise_id}/itens/{item_id}` | Excluir item (RN excluído sai das referências das FN) |
 
 ### Histórias de Usuário (US-05, 06, 16–20)
 | Método | Rota | Descrição |

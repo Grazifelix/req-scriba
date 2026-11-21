@@ -20,7 +20,7 @@ Comando: `make test` (equivale a `pytest -q`). Os testes de API e de Chroma usam
 | `test_domain_qus.py` | porcentagem para 0..13 critérios (7,69 … 100,00); faixas nos limites (24,99/25/49,99/50/74,99/75/99,99/100); normalização de resultados ("atende", "Parcial", "não atende", desconhecido) |
 | `test_domain_story_format.py` | montagem do template; `[A DEFINIR: …]` para elementos ausentes; parsing de texto livre "Como…, quero…, para…"; texto fora do padrão |
 | `test_domain_text_chunking.py` | normalização; similaridade; offsets dos chunks batem com o texto; sobreposição; janelas de segmentos respeitam limite e tempos |
-| `test_llm_parsing.py` | extração tolera chaves alternativas, descarta itens sem funcionalidade, rótulos inválidos; avaliação QUS preenche critérios faltantes com `Atenção`; JSON envolvido em texto/markdown |
+| `test_llm_parsing.py` | extração tolera chaves alternativas, descarta itens sem funcionalidade, rótulos inválidos; códigos `FN1`/`RN2`/`H1`/`CA03` nunca viram fonte; resposta 2.0 (análise, `citacao`, `lacunas_conjunto`, minúscula inicial com siglas preservadas) e formato antigo aceito; avaliação QUS preenche critérios faltantes com `Atenção`; JSON envolvido em texto/markdown |
 | `test_integrations.py` | `OllamaClient` e `OpenAICompatibleClient` (sucesso, JSON inválido + retentativa, timeout, HTTP 401/429/500 → `ExternalServiceError`, chave fora dos erros); seleção de provedores e erros de configuração; coleções separadas por modelo; extratores TXT/DOCX/PDF; saneamento de nome; assinatura binária |
 
 ## 3. Testes de componentes (serviços)
@@ -31,6 +31,8 @@ Comando: `make test` (equivale a `pytest -q`). Os testes de API e de Chroma usam
 | `test_services_stories.py` | US-05 CA01–04; US-06 CA01–04; US-16 CA01–04; US-17 CA01–04; US-19 CA01–04; US-20 CA01–03; regra RN11 (fonte com erro bloqueia geração) |
 | `test_services_quality.py` | US-07 CA01–03; US-08 CA01–02 (histórico preservado, comparação resolvido/novo); US-09 CA01–03 (lacunas sem invenção); regras determinísticas (well_formed, unique, uniform) |
 | `test_services_questions.py` | US-10 CA01–04; US-11 CA01–03; US-12 CA01–03 |
+| `test_services_generation_passes.py` | (modo lotes forçado com lotes pequenos) Passada de contexto (itens `R#` citáveis resolvidos para trechos reais, item sem fonte descartado, falha não derruba o job, orçamento do lote); passada de consolidação (fundir, preencher literal com evidências da doadora, contradição impede fusão e vira lacuna `conflito`, falha mantém candidatas); variáveis que desligam as passadas; US-14 CA03 com contexto e consolidação |
+| `test_services_analysis.py` | Modo chamada única (todas as fontes, sem contexto/consolidação, fontes antes das instruções); análise gravada com evidências reais, códigos RN/FN e ligação FN → HU; citação conferida; lacuna de conjunto vira `conflito`; modo lotes mescla itens e renumera códigos; análise revisada entra no prompt seguinte; CRUD por item (códigos automáticos, referências, trechos do projeto, exclusão de RN limpa referências) |
 | `test_services_updates.py` | US-13 CA01–03; US-14 CA01–04 (HU aprovada intocada até aprovar); US-15 CA01–04; US-18 CA01–03 |
 | `test_services_sources.py` (reindexação) | `reindex_all` restaura a busca após troca de modelo, usa o embedder configurado e sinaliza pendência |
 | `test_schemas.py` | Contrato: todas as respostas dos serviços validam contra os `response_model` da API (roda sem FastAPI) |
@@ -43,6 +45,8 @@ Comando: `make test` (equivale a `pytest -q`). Os testes de API e de Chroma usam
 - contrato de erro: 404 de recurso, 404 de rota, 422 de Pydantic (`entrada_invalida`), 422 de negócio,
   409 de conflito — todos com `{"erro": {...}}`;
 - listas no formato `{"itens","total"}`;
+- CRUD de análises e itens (criar, adicionar item com código FN, editar, marcar revisada com `X-Usuario`,
+  422 de tipo inválido e de referência indevida, excluir, 404 depois);
 - `/openapi.json` contém todas as rotas documentadas em `architecture.md`;
 - `GET /audios/{id}/arquivo` devolve o binário com `content-type` correto;
 - CORS para o frontend em outra origem: preflight com `X-Usuario` na origem permitida; origem fora da
@@ -59,6 +63,7 @@ Comando: `make test` (equivale a `pytest -q`). Os testes de API e de Chroma usam
 6. Correção de transcrição altera os trechos usados na próxima geração.
 7. LLM citando rótulo inexistente não cria evidência; HU sem evidência é sinalizada.
 8. Documento sem texto extraível nunca é usado na geração.
+9. Contexto e consolidação nunca criam evidência fora do banco nem texto de HU sem fonte: itens de contexto sem trecho são descartados e a consolidação só aplica operações sobre textos já extraídos.
 
 ## 6. Casos de erro
 

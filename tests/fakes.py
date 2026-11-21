@@ -58,9 +58,19 @@ def default_impact(prompt: str) -> dict[str, Any]:
     return {"relacao": "sem_relacao", "justificativa": "", "fontes": []}
 
 
+def default_context(prompt: str) -> dict[str, Any]:
+    return {"perfis": [], "objetivos": [], "termos": []}  # neutro: não altera prompts nem orçamento dos lotes
+
+
+def default_consolidation(prompt: str) -> dict[str, Any]:
+    return {"fundir": [], "preencher": [], "contradicoes": []}
+
+
 class FakeLLM:
     def __init__(self) -> None:
         self.handlers: dict[str, Handler] = {
+            "CONTEXTO_REUNIAO": default_context,
+            "CONSOLIDACAO_HISTORIAS": default_consolidation,
             "EXTRACAO_HISTORIAS": default_extraction,
             "AVALIACAO_QUS_INDIVIDUAL": default_individual,
             "AVALIACAO_QUS_CONJUNTO": default_set,

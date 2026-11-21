@@ -150,6 +150,12 @@ class SuggestionOut(OutputModel):
     conteudo_atual: Optional[dict[str, Any]]
     conteudo_proposto: dict[str, Any]
     evidencias: list[dict[str, Any]]
+    fontes_audio: list[dict[str, Any]] = Field(
+        default_factory=list, description="Trechos de áudio que embasam a sugestão (com minuto e URL do momento)"
+    )
+    fontes_documentos: list[dict[str, Any]] = Field(
+        default_factory=list, description="Trechos de documentos que embasam a sugestão (com página)"
+    )
     status: str
     status_rotulo: str
     editada: bool

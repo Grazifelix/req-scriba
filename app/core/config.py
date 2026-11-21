@@ -28,6 +28,13 @@ def _env_float(name: str, default: float) -> float:
     return float(_env(name, str(default)))
 
 
+def _env_bool(name: str, default: bool) -> bool:
+    value = _env(name, "").strip().lower()
+    if not value:
+        return default
+    return value in ("1", "true", "sim", "yes", "on")
+
+
 @dataclass
 class Settings:
     """Parâmetros de execução. Valores padrão documentados em docs/specs.md §13."""
@@ -57,6 +64,10 @@ class Settings:
     transcript_window_chars: int = field(default_factory=lambda: _env_int("TRANSCRIPT_WINDOW_CHARS", 800))
     generation_batch_chars: int = field(default_factory=lambda: _env_int("GENERATION_BATCH_CHARS", 6000))
     rag_top_k: int = field(default_factory=lambda: _env_int("RAG_TOP_K", 4))
+    # Passadas extras da extração de HU (geração e novas fontes): contexto prévio e consolidação final
+    generation_context_pass: bool = field(default_factory=lambda: _env_bool("GENERATION_CONTEXT_PASS", True))
+    generation_context_chars: int = field(default_factory=lambda: _env_int("GENERATION_CONTEXT_CHARS", 1200))
+    generation_consolidation: bool = field(default_factory=lambda: _env_bool("GENERATION_CONSOLIDATION", True))
     cors_origins: list[str] = field(
         default_factory=lambda: [
             o.strip()

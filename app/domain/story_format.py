@@ -30,6 +30,13 @@ def clean_element(value: str | None) -> str | None:
     return text
 
 
+def lower_first(value: str | None) -> str | None:
+    """Minúscula inicial ("Fazer pedidos" → "fazer pedidos"), preservando siglas ("PDV", "QR")."""
+    if not value or len(value) < 2 or not value[0].isupper() or not value[1].islower():
+        return value
+    return value[0].lower() + value[1:]
+
+
 def build_story_text(perfil: str | None, funcionalidade: str | None, beneficio: str | None) -> str:
     """Monta o texto da HU; elementos ausentes viram "[A DEFINIR: <elemento>]" (nunca suposições)."""
     parts = {

@@ -17,6 +17,17 @@ def evidence_spec(chunk: dict, claim: str | None = None) -> dict:
     }
 
 
+def specs_for_labels(labels: list[str], sources: dict[str, list[dict]]) -> list[dict]:
+    """Rótulos F (um trecho) ou R (trechos de um item de contexto) → evidências sem trecho repetido."""
+    specs, seen = [], set()
+    for label in labels:
+        for chunk in sources.get(label, []):
+            if chunk["id"] not in seen:
+                seen.add(chunk["id"])
+                specs.append(evidence_spec(chunk))
+    return specs
+
+
 def add_evidences(uow: UnitOfWork, story_id: int, specs: list[dict], origin: str) -> list[int]:
     """Registra evidências (sem duplicar o mesmo trecho na mesma história)."""
     existing = {e["trecho_id"] for e in uow.evidences.list_by_story(story_id) if e["trecho_id"]}

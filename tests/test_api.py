@@ -204,12 +204,43 @@ def test_lists_and_security_headers(client):
     project_id = create_project(client)
     for path in ("/projetos", f"/projetos/{project_id}/audios", f"/projetos/{project_id}/documentos",
                  f"/projetos/{project_id}/historias", f"/projetos/{project_id}/perguntas",
-                 f"/projetos/{project_id}/sugestoes-atualizacao", f"/projetos/{project_id}/jobs"):
+                 f"/projetos/{project_id}/sugestoes-atualizacao", f"/projetos/{project_id}/jobs",
+                 f"/projetos/{project_id}/analises"):
         response = client.get(API + path)
         assert set(response.json()) >= {"itens", "total"}, path
     response = client.get(f"{API}/projetos")
     assert response.headers["x-content-type-options"] == "nosniff"
     assert response.headers["x-frame-options"] == "DENY"
+
+
+def test_analysis_crud(client):
+    project_id = create_project(client)
+    created = client.post(f"{API}/projetos/{project_id}/analises", json={
+        "sistema": "Portal escolar",
+        "itens": [{"tipo": "requisito_negocio", "texto": "reduzir erros de matrícula"}],
+    })
+    assert created.status_code == 201, created.text
+    analysis_id = created.json()["id"]
+    base = f"{API}/analises/{analysis_id}"
+
+    item = client.post(f"{base}/itens", json={"tipo": "funcionalidade", "texto": "cadastrar alunos",
+                                               "complemento": "secretaria", "referencias": ["RN1"]})
+    assert item.status_code == 201 and item.json()["codigo"] == "FN1" and item.json()["tipo_rotulo"] == "Funcionalidade"
+    item_id = item.json()["id"]
+    edited = client.patch(f"{base}/itens/{item_id}", json={"texto": "matricular alunos"}).json()
+    assert edited["texto"] == "matricular alunos" and edited["editado"] is True
+
+    reviewed = client.patch(base, json={"revisada": True}, headers={"X-Usuario": "bia"}).json()
+    assert reviewed["revisada"] is True and reviewed["revisada_por"] == "bia"
+    assert reviewed["totais"]["funcionalidade"] == 1
+    assert client.get(f"{API}/projetos/{project_id}/analises").json()["total"] == 1
+
+    assert_error(client.post(f"{base}/itens", json={"tipo": "invalido", "texto": "x"}), 422, "entrada_invalida")
+    assert_error(client.post(f"{base}/itens", json={"tipo": "usuario", "texto": "x", "referencias": ["RN1"]}),
+                 422, "validacao")
+    assert client.delete(f"{base}/itens/{item_id}").status_code == 204
+    assert client.delete(base).status_code == 204
+    assert_error(client.get(base), 404, "nao_encontrado")
 
 
 def test_openapi_documents_all_routes(client):
@@ -233,6 +264,8 @@ def test_openapi_documents_all_routes(client):
         "/projetos/{projeto_id}/atualizacoes/analisar", "/projetos/{projeto_id}/sugestoes-atualizacao",
         "/sugestoes-atualizacao/{sugestao_id}", "/sugestoes-atualizacao/{sugestao_id}/aprovar",
         "/sugestoes-atualizacao/{sugestao_id}/rejeitar", "/jobs/{job_id}", "/projetos/{projeto_id}/jobs",
+        "/projetos/{projeto_id}/analises", "/analises/{analise_id}", "/analises/{analise_id}/itens",
+        "/analises/{analise_id}/itens/{item_id}",
     }
     assert {API + p for p in expected} <= paths
     for path, operations in spec["paths"].items():

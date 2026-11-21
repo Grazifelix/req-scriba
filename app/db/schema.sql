@@ -180,6 +180,40 @@ CREATE TABLE IF NOT EXISTS sugestoes_atualizacao (
 );
 CREATE INDEX IF NOT EXISTS ix_sugestoes_projeto ON sugestoes_atualizacao(projeto_id, status);
 
+-- Análise das fontes: como a IA (ou o analista) entendeu a reunião. Uma por geração de histórias.
+CREATE TABLE IF NOT EXISTS analises (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    projeto_id INTEGER NOT NULL REFERENCES projetos(id) ON DELETE CASCADE,
+    job_id TEXT,
+    origem TEXT NOT NULL CHECK (origem IN ('ia', 'manual')),
+    sistema TEXT,
+    fontes TEXT NOT NULL DEFAULT '[]',
+    revisada INTEGER NOT NULL DEFAULT 0,
+    revisada_por TEXT,
+    revisada_em TEXT,
+    criado_em TEXT NOT NULL,
+    atualizado_em TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS ix_analises_projeto ON analises(projeto_id, id);
+
+CREATE TABLE IF NOT EXISTS itens_analise (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    analise_id INTEGER NOT NULL REFERENCES analises(id) ON DELETE CASCADE,
+    tipo TEXT NOT NULL CHECK (tipo IN ('participante', 'usuario', 'requisito_negocio', 'funcionalidade', 'fora_de_escopo')),
+    codigo TEXT,
+    texto TEXT NOT NULL,
+    complemento TEXT,
+    referencias TEXT NOT NULL DEFAULT '[]',
+    evidencias TEXT NOT NULL DEFAULT '[]',
+    historia_ids TEXT NOT NULL DEFAULT '[]',
+    origem TEXT NOT NULL CHECK (origem IN ('ia', 'manual')),
+    editado INTEGER NOT NULL DEFAULT 0,
+    posicao INTEGER NOT NULL,
+    criado_em TEXT NOT NULL,
+    atualizado_em TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS ix_itens_analise ON itens_analise(analise_id, posicao);
+
 CREATE TABLE IF NOT EXISTS jobs (
     id TEXT PRIMARY KEY,
     projeto_id INTEGER NOT NULL REFERENCES projetos(id) ON DELETE CASCADE,

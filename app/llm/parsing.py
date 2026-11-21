@@ -11,7 +11,7 @@ import re
 from typing import Any
 
 from app.domain import qus
-from app.domain.story_format import clean_element
+from app.domain.story_format import clean_element, lower_first
 
 MAX_TEXT = 2000
 
@@ -69,16 +69,30 @@ def _as_list(value: Any) -> list[Any]:
     return [value]
 
 
-def normalize_label(value: Any) -> str | None:
-    """Converte "F3", "[F3]", "f3" ou 3 em "F3"."""
+_LABEL_RE = re.compile(r"(?<![^\W_])([FRCfrc])?\s*(\d+)")  # início não pode vir colado a letra ou dígito
+
+
+def normalize_label(value: Any, default_prefix: str = "F") -> str | None:
+    """Converte "F3", "[F3]", "f3" ou 3 em "F3"; preserva os prefixos R (contexto) e C (candidata).
+
+    Números colados a outras letras ("FN1", "RN2", "H1") não são rótulos de fonte e são rejeitados.
+    """
+    match = _LABEL_RE.search(str(value or ""))
+    if not match:
+        return None
+    return f"{(match.group(1) or default_prefix).upper()}{int(match.group(2))}"
+
+
+def _code(value: Any, prefix: str) -> str | None:
+    """Código local da resposta (RN1, FN2, H3): aceita "FN2", "fn 2" ou 2."""
     match = re.search(r"(\d+)", str(value or ""))
-    return f"F{int(match.group(1))}" if match else None
+    return f"{prefix}{int(match.group(1))}" if match else None
 
 
-def _labels(value: Any, valid: set[str]) -> list[str]:
+def _labels(value: Any, valid: set[str], default_prefix: str = "F") -> list[str]:
     labels = []
     for item in _as_list(value):
-        label = normalize_label(item)
+        label = normalize_label(item, default_prefix)
         if label and label in valid and label not in labels:
             labels.append(label)
     return labels
@@ -124,11 +138,12 @@ def normalize_story(item: dict[str, Any], valid_labels: set[str]) -> dict[str, A
     funcionalidade = clean_element(_text(_pick(item, "funcionalidade", "acao", "action", "quero", "want", "meio"), 500))
     if not funcionalidade:
         return None
+    beneficio = clean_element(_text(_pick(item, "beneficio", "benefit", "para", "so_that", "fim", "objetivo"), 500))
     return {
         "titulo": _text(_pick(item, "titulo", "title", "nome"), 200),
         "perfil": clean_element(_text(_pick(item, "perfil", "persona", "papel", "role", "ator", "como"), 200)),
-        "funcionalidade": funcionalidade,
-        "beneficio": clean_element(_text(_pick(item, "beneficio", "benefit", "para", "so_that", "fim", "objetivo"), 500)),
+        "funcionalidade": lower_first(funcionalidade),
+        "beneficio": lower_first(beneficio),
         "criterios_aceitacao": _criteria(_pick(item, "criterios_aceitacao", "acceptance_criteria", "criterios")),
         "fontes": _labels(_pick(item, "fontes", "sources", "evidencias", "referencias", "trechos"), valid_labels),
         "informacoes_ausentes": _gaps(_pick(item, "informacoes_ausentes", "lacunas", "missing_info")),
@@ -141,6 +156,156 @@ def normalize_story(item: dict[str, Any], valid_labels: set[str]) -> dict[str, A
 def normalize_extraction(data: dict[str, Any], valid_labels: set[str]) -> list[dict[str, Any]]:
     stories = (normalize_story(item, valid_labels) for item in _story_items(data))
     return [s for s in stories if s]
+
+
+# -- Análise das fontes (etapa 1 do prompt de extração) ---------------------
+ANALYSIS_ITEM_TYPES: dict[str, tuple[str, ...]] = {
+    "participante": ("participantes", "participants"),
+    "usuario": ("usuarios", "usuários", "users", "perfis"),
+    "requisito_negocio": ("requisitos_negocio", "requisitos_de_negocio", "requisitos_negócio", "business_requirements"),
+    "funcionalidade": ("funcionalidades", "functional_requirements", "necessidades"),
+    "fora_de_escopo": ("fora_de_escopo", "out_of_scope", "nao_requisitos"),
+}
+ANALYSIS_CODE_PREFIX = {"requisito_negocio": "RN", "funcionalidade": "FN"}
+MAX_ANALYSIS_ITEMS = 40
+TEXT_KEYS = ("descricao", "texto", "description", "text")
+_ITEM_FIELDS: dict[str, tuple[tuple[str, ...], tuple[str, ...]]] = {
+    # tipo: (chaves do texto principal, chaves do complemento)
+    "participante": (("nome", "name", *TEXT_KEYS), ("papel_na_reuniao", "papel", "role", "funcao")),
+    "usuario": (("papel", "perfil", "nome", "role", *TEXT_KEYS[1:]), ("descricao", "description")),
+    "requisito_negocio": (TEXT_KEYS, ()),
+    "funcionalidade": (TEXT_KEYS, ("usuario", "perfil", "user")),
+    "fora_de_escopo": (TEXT_KEYS, ("motivo", "reason", "justificativa")),
+}
+
+
+def _analysis_item(kind: str, raw: Any, valid_labels: set[str]) -> dict[str, Any] | None:
+    text_keys, extra_keys = _ITEM_FIELDS[kind]
+    if isinstance(raw, dict):
+        text = _text(_pick(raw, *text_keys), 500)
+        complement = _text(_pick(raw, *extra_keys), 500) if extra_keys else None
+        sources = _labels(_pick(raw, "fontes", "sources", "evidencias", "trechos"), valid_labels)
+        code_prefix = ANALYSIS_CODE_PREFIX.get(kind)
+        code = _code(_pick(raw, "id", "codigo", "code"), code_prefix) if code_prefix else None
+        refs = _as_list(_pick(raw, "requisitos_negocio", "requisitos", "business_requirements")) if kind == "funcionalidade" else []
+    else:
+        text, complement, sources, code, refs = _text(raw, 500), None, [], None, []
+    if not text:
+        return None
+    return {
+        "tipo": kind, "codigo": code, "texto": text, "complemento": complement,
+        "referencias": [r for r in (_code(x, "RN") for x in refs) if r], "fontes": sources,
+    }
+
+
+def normalize_analysis(data: Any, valid_labels: set[str]) -> dict[str, Any]:
+    """Retorna {"sistema", "itens"}; itens = [{"tipo", "codigo", "texto", "complemento", "referencias", "fontes"}]."""
+    if not isinstance(data, dict):
+        return {"sistema": None, "itens": []}
+    items = []
+    for kind, names in ANALYSIS_ITEM_TYPES.items():
+        for raw in _as_list(_pick(data, *names))[:MAX_ANALYSIS_ITEMS]:
+            item = _analysis_item(kind, raw, valid_labels)
+            if item:
+                items.append(item)
+    return {"sistema": _text(_pick(data, "sistema", "system", "produto", "solucao"), 500), "itens": items}
+
+
+def _set_gaps(value: Any) -> list[dict[str, Any]]:
+    gaps = []
+    for item in _as_list(value):
+        if not isinstance(item, dict):
+            continue
+        kind = _key(_pick(item, "tipo", "type", default="fluxo_incompleto"))
+        refs = [r for r in (_code(x, "H") for x in _as_list(_pick(item, "historias", "stories", "ids"))) if r]
+        description = _text(_pick(item, "descricao", "description", "motivo"), 1000)
+        if refs and description:
+            gaps.append({"tipo": "conflito" if kind.startswith("conf") else "fluxo_incompleto",
+                         "historias": refs, "descricao": description})
+    return gaps
+
+
+def normalize_extraction_result(data: dict[str, Any], valid_labels: set[str]) -> dict[str, Any]:
+    """Resposta completa da extração: histórias (com "ref", "funcionalidade_ref" e "citacao"), análise e
+    lacunas de conjunto. Campos ausentes viram valores vazios: respostas no formato antigo continuam válidas."""
+    stories = []
+    for raw in _story_items(data):
+        story = normalize_story(raw, valid_labels)
+        if not story:
+            continue
+        story["ref"] = _code(_pick(raw, "id", "codigo"), "H")
+        story["funcionalidade_ref"] = _code(_pick(raw, "funcionalidade_ref", "funcionalidade_id"), "FN")
+        story["citacao"] = _text(_pick(raw, "citacao", "citação", "quote", "trecho_literal"), 500)
+        stories.append(story)
+    return {
+        "historias": stories,
+        "analise": normalize_analysis(_pick(data, "analise", "análise", "analysis"), valid_labels),
+        "lacunas": _set_gaps(_pick(data, "lacunas_conjunto", "lacunas_do_conjunto", "set_gaps")),
+    }
+
+
+CONTEXT_TYPES = {
+    "perfil": ("perfis", "perfil", "personas", "atores", "usuarios"),
+    "objetivo": ("objetivos", "objetivo", "beneficios", "metas"),
+    "termo": ("termos", "termo", "glossario", "conceitos"),
+}
+
+
+def _context_text(item: Any) -> str | None:
+    if not isinstance(item, dict):
+        return _text(item, 300)
+    text = _text(_pick(item, "texto", "descricao", "description", "resumo", "text"), 300)
+    term = _text(_pick(item, "termo", "nome", "perfil", "name"), 100)
+    definition = _text(_pick(item, "definicao", "significado", "definition"), 250)
+    if term and definition:
+        return f"{term}: {definition}"
+    return text or term
+
+
+def normalize_context(data: dict[str, Any], valid_labels: set[str]) -> list[dict[str, Any]]:
+    """Itens de contexto [{"tipo", "texto", "fontes"}]. Itens sem rótulo válido são descartados."""
+    items = []
+    for kind, names in CONTEXT_TYPES.items():
+        for raw in _as_list(_pick(data, *names))[:15]:
+            text = _context_text(raw)
+            raw_labels = _pick(raw, "fontes", "sources", "evidencias", "trechos") if isinstance(raw, dict) else None
+            labels = _labels(raw_labels, valid_labels)
+            if text and labels:
+                items.append({"tipo": kind, "texto": text, "fontes": labels})
+    return items
+
+
+CONSOLIDATION_FIELDS = {"perfil", "beneficio"}
+
+
+def _group_labels(item: Any, valid: set[str]) -> list[str]:
+    raw = _pick(item, "historias", "grupo", "candidatas", "ids", "itens") if isinstance(item, dict) else item
+    return _labels(raw, valid, "C")
+
+
+def normalize_consolidation(data: dict[str, Any], valid_labels: set[str]) -> dict[str, list[dict[str, Any]]]:
+    """Operações de consolidação sobre candidatas C1..Cn. Nunca contém texto de história."""
+    merges = []
+    for item in _as_list(_pick(data, "fundir", "fusoes", "merge", "merges")):
+        group = _group_labels(item, valid_labels)
+        if len(group) >= 2:
+            merges.append({"historias": group})
+    fills = []
+    for item in _as_list(_pick(data, "preencher", "preenchimentos", "fill", "fills")):
+        if not isinstance(item, dict):
+            continue
+        target = normalize_label(_pick(item, "alvo", "target", "historia"), "C")
+        donor = normalize_label(_pick(item, "de", "doador", "origem", "from", "source"), "C")
+        field = _key(_pick(item, "campo", "field", "elemento", default="")).replace("í", "i")
+        if target in valid_labels and donor in valid_labels and target != donor and field in CONSOLIDATION_FIELDS:
+            fills.append({"alvo": target, "campo": field, "de": donor})
+    conflicts = []
+    for item in _as_list(_pick(data, "contradicoes", "conflitos", "contradictions", "conflicts")):
+        group = _group_labels(item, valid_labels)
+        if len(group) >= 2:
+            description = _text(_pick(item, "descricao", "motivo", "description"), 500) if isinstance(item, dict) else None
+            conflicts.append({"historias": group, "descricao": description or "Requisitos possivelmente conflitantes."})
+    return {"fundir": merges, "preencher": fills, "contradicoes": conflicts}
 
 
 def _criterion_entry(value: Any, text_key: str) -> dict[str, str]:

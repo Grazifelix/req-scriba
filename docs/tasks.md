@@ -95,9 +95,14 @@ Status: ✅ concluída nesta versão · ⏳ depende de ambiente do usuário (ver
 ### T11.2 README e docs revisados ✅ — instalação do zero, Ollama, Whisper, exemplos `curl`.
 ### T11.3 Preparação para frontend em projeto separado ✅ — `app/main.py`, `tests/test_api.py`, `docs/ux-guidelines.md` §8. Aceite: erro 500 com CORS e JSON; testes de CORS; guia de integração. Dep.: T11.1
 ### T11.4 Arquitetura agnóstica de LLM ✅ — `app/integrations/{llm,ollama,openai_compatible,embeddings,vector_store}.py`, `app/core/{config,container}.py`, `app/services/indexing.py`, `app/workers/reindex.py`. Aceite: provedores por configuração; coleção por modelo; `make reindex`; `/health` neutro. Dep.: T4.2, T4.3
+### T11.5 Contexto prévio e consolidação na extração de HU ✅ — `app/services/{candidates,context,consolidation}.py`, `app/services/{generation,updates}.py`, `app/llm/{prompts,parsing}.py`, `app/core/config.py`, `tests/test_services_generation_passes.py`. Aceite: itens de contexto citáveis e rastreáveis; consolidação só por operações; contradições não fundidas; falhas não derrubam o job; passadas desligáveis. Dep.: T6.2, T9.1
+### T11.6 Prompt de extração 2.0 e análise das fontes ✅ — `app/llm/{prompts,parsing}.py`, `app/services/{analysis,candidates,generation,updates,evidence,presenters}.py`, `app/repositories/analyses.py`, `app/schemas/analyses.py`, `app/api/routers/analyses.py`, `app/db/schema.sql`, `app/domain/{enums,story_format}.py`, `tests/test_services_analysis.py`. Aceite: modo chamada única sem passadas extras; análise gravada por geração com evidências reais e ligação FN → HU; CRUD por item com validação de referências e trechos; análise revisada usada no prompt seguinte; rótulos `FN1`/`RN2`/`H1` rejeitados como fonte; citação conferida; lacunas de conjunto viram `informacoes_ausentes`. Dep.: T11.5
 
 ## Backlog técnico (próximas versões)
 - Registrar `modelo_llm` e `versao_prompt` em versões e avaliações (exige migração do banco).
+- Adaptador `openai_compatible`: `max_tokens` configurável, erro claro quando `finish_reason == "length"` e nova tentativa com espera para HTTP 429 (necessários para chamada única com modelos em nuvem).
+- Guardar dependências entre HU (causalidade/superclasse) pedidas pelo critério *Independente* (exige coluna em `historias`).
+- Enriquecer o prompt de avaliação QUS com os exemplos incorreto → correto de Lucassen et al.
 - Fila dedicada (RQ/Arq) e recuperação de jobs interrompidos na inicialização.
 - Migrações versionadas (ex.: `yoyo-migrations`) ao migrar para PostgreSQL.
 - Autenticação JWT e escopo de projetos por usuário.

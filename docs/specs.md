@@ -31,6 +31,7 @@ reqscriba/
 │   ├── repositories/             # SQL puro por agregado
 │   │   ├── base.py · projects.py · sources.py (áudios, segmentos, documentos, trechos)
 │   │   ├── stories.py (histórias, versões, evidências) · workflow.py (avaliações, perguntas, sugestões, jobs)
+│   │   ├── analyses.py (análises e itens de análise)
 │   ├── domain/                   # regras puras, sem I/O
 │   │   ├── enums.py · qus.py · story_format.py · text.py · chunking.py
 │   ├── integrations/
@@ -47,16 +48,18 @@ reqscriba/
 │   │   └── parsing.py            # normalização/validação das respostas JSON do LLM
 │   ├── services/
 │   │   ├── common.py · projects.py · audios.py · documents.py · indexing.py · retrieval.py
-│   │   ├── stories.py · versioning.py · evidence.py · generation.py
+│   │   ├── stories.py · versioning.py · evidence.py · generation.py · candidates.py
+│   │   ├── context.py · consolidation.py · analysis.py (análise das fontes + CRUD)
 │   │   ├── quality.py · questions.py · updates.py · jobs.py · presenters.py
 │   ├── workers/
 │   │   ├── tasks.py              # tarefas em background (abrem a própria UnitOfWork)
 │   │   └── reindex.py            # `make reindex`: reconstrói o índice vetorial
-│   ├── schemas/                  # Pydantic: common, projects, sources, stories, workflow
+│   ├── schemas/                  # Pydantic: common, projects, sources, analyses, stories, workflow
 │   └── api/
 │       ├── deps.py               # injeção: container, uow, responsável
 │       └── routers/              # health, projects (+busca), sources (áudios, transcrição, documentos),
-│                                 # stories (+evidências, versões), workflow (qualidade, perguntas, atualizações, jobs)
+│                                 # analyses (análises e itens), stories (+evidências, versões),
+│                                 # workflow (qualidade, perguntas, atualizações, jobs)
 ├── tests/                        # pytest (fakes de LLM/ASR/embeddings)
 └── data/                         # criado em runtime: reqscriba.db, chroma/, uploads/
 ```
@@ -139,6 +142,18 @@ id (uuid hex), projeto_id, tipo (`geracao_historias|analise_atualizacao`), statu
 (`pendente|processando|concluido|erro`), parametros (JSON), resultado (JSON), mensagem_erro,
 criado_em, atualizado_em, concluido_em.
 
+### 3.13 `analises`
+id, projeto_id, job_id (geração que a produziu; NULL se manual), origem (`ia|manual`), sistema,
+fontes (JSON `[{"tipo_fonte","fonte_id","nome_arquivo"}]`), revisada (0/1), revisada_por, revisada_em,
+criado_em, atualizado_em. Uma por geração; a revisada mais recente do projeto orienta as próximas extrações.
+
+### 3.14 `itens_analise`
+id, analise_id, tipo (`participante|usuario|requisito_negocio|funcionalidade|fora_de_escopo`), codigo
+(`RN1..`/`FN1..`; NULL nos demais tipos), texto, complemento (papel na reunião · descrição do usuário ·
+usuário da funcionalidade · motivo de estar fora de escopo), referencias (JSON, só funcionalidades: códigos RN),
+evidencias (JSON, cópias de trechos como em `sugestoes_atualizacao`), historia_ids (JSON, HU geradas a partir
+da funcionalidade), origem (`ia|manual`), editado (0/1), posicao, criado_em, atualizado_em.
+
 ## 4. Contratos JSON principais
 
 ### 4.1 História de Usuário (`GET /historias/{id}`)
@@ -195,7 +210,34 @@ União de: critérios QUS ≠ Atende da última avaliação (`qus:<criterio>`), 
 `informacoes_ausentes` (`lacuna:<n>`), afirmações sem evidência (`sem_evidencia:<n>`). Cada defeito:
 `{"chave", "tipo", "criterio", "descricao", "acao_sugerida"}`.
 
-### 4.4 Erro
+### 4.4 Análise das fontes (`GET /analises/{id}`)
+```json
+{
+  "id": 3, "projeto_id": 1, "job_id": "a1b2…", "origem": "ia", "sistema": "Pedidos por tablet na mesa",
+  "fontes": [{"tipo_fonte": "audio", "fonte_id": 4, "nome_arquivo": "kickoff.mp3"}],
+  "revisada": false, "revisada_por": null, "revisada_em": null,
+  "totais": {"participante": 2, "usuario": 1, "requisito_negocio": 1, "funcionalidade": 1, "fora_de_escopo": 1},
+  "itens": [
+    {"id": 10, "tipo": "funcionalidade", "tipo_rotulo": "Funcionalidade", "codigo": "FN1",
+     "texto": "fazer pedidos pelo tablet da mesa", "complemento": "cliente", "referencias": ["RN1"],
+     "evidencias": [{"trecho_id": 52, "tipo_fonte": "audio", "fonte_id": 4, "nome_arquivo": "kickoff.mp3",
+                     "texto": "...", "localizacao": {"inicio_segundos": 42.0, "fim_segundos": 90.1},
+                     "url_momento": "/api/v1/audios/4/arquivo#t=42.0"}],
+     "possui_evidencia": true, "historia_ids": [31], "origem": "ia", "editado": false}
+  ],
+  "criado_em": "...", "atualizado_em": "..."
+}
+```
+O resultado do job de geração traz `modo` (`chamada_unica|lotes`), `analise_id` (NULL se o modelo não
+devolveu análise) e `analise_revisada_usada`.
+
+### 4.5 Sugestão de atualização (`GET /sugestoes-atualizacao/{id}`)
+Além de `evidencias` (cópias cruas dos trechos), a resposta traz `fontes_audio` e `fontes_documentos`,
+no mesmo formato das fontes de uma HU (áudio com `inicio_formatado` e `url_momento`; documento com
+`pagina`), mas sem `evidencia_id`, `origem` e `criado_em`, que só existem depois da aprovação. O
+frontend usa esses campos para mostrar em quais fontes a IA se baseou.
+
+### 4.6 Erro
 ```json
 {"erro": {"codigo": "validacao", "mensagem": "Formato de arquivo não suportado: .exe", "detalhes": {"extensoes_aceitas": [".mp3"]}}}
 ```
@@ -232,14 +274,49 @@ União de: critérios QUS ≠ Atende da última avaliação (`qus:<criterio>`), 
 - Resposta inválida → uma nova tentativa pedindo JSON estrito → `ExternalServiceError` (HTTP 502/erro no job).
 - Fontes enviadas como blocos rotulados `[F1] (audio reuniao.mp3 00:01:02–00:01:20) texto…`. O LLM cita
   rótulos; o backend resolve rótulos → `trechos_fonte` e copia o texto para `evidencias`. Rótulos
-  inexistentes são descartados. HU sem rótulo válido recebe afirmação "sem trecho de origem".
-- **Geração:** lotes de até 6000 caracteres. Com áudios: cada lote de janelas de transcrição é
+  inexistentes são descartados, assim como códigos que não são fontes (`FN1`, `RN2`, `H1`). HU sem rótulo
+  válido recebe afirmação "sem trecho de origem".
+- **Prompt de extração (versão 2.0, `### TAREFA: EXTRACAO_HISTORIAS`):** fontes primeiro (entre `<fontes>`),
+  instruções e formato no final. O JSON pede, nesta ordem, `analise` (sistema, participantes, usuários,
+  requisitos de negócio `RN#`, funcionalidades `FN#`, fora de escopo), `historias` (com `id` `H#`,
+  `funcionalidade_ref`, `citacao` literal) e `lacunas_conjunto`. Traz os 13 critérios QUS com exemplos
+  incorreto → correto e a lista do que não é história. Na leitura da resposta: funcionalidade e benefício
+  com minúscula inicial (siglas preservadas); `citacao` conferida contra o texto dos trechos citados (se não
+  bater → `afirmacoes_sem_evidencia`); `lacunas_conjunto` (`conflito`, `fluxo_incompleto`) → `informacoes_ausentes`
+  das HU citadas. Respostas no formato antigo (só `historias`) continuam válidas.
+- **Geração — modo chamada única:** quando o texto de todas as fontes (mais a análise revisada) cabe em
+  `REQSCRIBA_GENERATION_BATCH_CHARS`, uma única chamada recebe tudo, e as passadas de contexto e de
+  consolidação não rodam. Para modelos com contexto grande (ex.: Llama 4 Scout), aumente essa variável
+  (ex.: `300000`).
+- **Geração — modo lotes:** lotes de até 6000 caracteres. Com áudios: cada lote de janelas de transcrição é
   enriquecido com até 4 trechos de documentos recuperados por RAG (filtro pelas fontes selecionadas);
   trechos de documentos não usados são processados em lotes próprios. Deduplicação final por
-  similaridade (≥ 0,85) mescla evidências e critérios.
+  similaridade (≥ 0,85) mescla evidências, critérios e funcionalidades de origem (nos dois modos).
+- **Análise das fontes** (`services/analysis.py`): a análise de cada lote entra num `AnalysisBuilder`, que
+  mescla itens parecidos do mesmo tipo (≥ 0,85), une evidências e renumera `RN`/`FN` globalmente (com as
+  referências FN → RN remapeadas). Depois da criação das HU, cada funcionalidade guarda os ids das HU que
+  a citaram, e a análise é gravada (se não estiver vazia). A análise **revisada** mais recente do projeto
+  entra nos prompts de extração (geração e novas fontes) como seção "ANÁLISE REVISADA PELO ANALISTA",
+  descontada do orçamento dos lotes; ela não é fonte e não pode ser citada.
+- **Passada de contexto prévia** (`services/context.py`, `REQSCRIBA_GENERATION_CONTEXT_PASS`, só no modo lotes): antes da
+  extração, o LLM lê todas as fontes selecionadas em lotes (`### TAREFA: CONTEXTO_REUNIAO`) e lista perfis,
+  objetivos e termos, cada item citando rótulos `F`. Itens sem rótulo válido são descartados; itens
+  parecidos (≥ 0,85, mesmo tipo) são mesclados; perfis e objetivos têm prioridade até o limite
+  `REQSCRIBA_GENERATION_CONTEXT_CHARS`. Os itens recebem rótulos `R1..Rn` e entram em todos os prompts de
+  extração. Uma HU que cita `R#` recebe como evidência os trechos reais do item (até 3). O orçamento de cada
+  lote é reduzido pelo tamanho do contexto (piso: metade). Falhas são registradas e a extração segue sem contexto.
+- **Passada de consolidação** (`services/consolidation.py`, `REQSCRIBA_GENERATION_CONSOLIDATION`, só com mais de um lote): depois da
+  deduplicação, o LLM recebe só as candidatas (`C1..Cn`, sem trechos) e devolve apenas operações
+  (`### TAREFA: CONSOLIDACAO_HISTORIAS`): `fundir`, `preencher` (perfil/benefício ausente copiado
+  literalmente de outra candidata, com as evidências dela; nunca sobrescreve) e `contradicoes` (lacuna
+  `conflito` nas envolvidas; candidatas contraditórias nunca são fundidas). O código aplica as operações;
+  falha do LLM mantém as candidatas. O resultado do job traz `contexto` e `consolidacao` (`null` se desligadas).
 - **Análise de atualização:** para cada HU não desaprovada, busca vetorial restrita às novas fontes
   (top-4) → LLM classifica `sem_relacao|complementa|contradiz` e propõe conteúdo. Trechos novos não
-  citados por nenhuma HU passam pela extração → sugestões `novo_requisito` (descartando duplicatas ≥ 0,85).
+  citados por nenhuma HU passam pela extração → sugestões `novo_requisito` (descartando duplicatas ≥ 0,90).
+  O contexto prévio é construído sobre todas as novas fontes quando elas não cabem numa chamada, e a
+  consolidação roda sobre as candidatas (com mais de um lote) antes do descarte de duplicatas. A análise
+  devolvida nessa extração não é gravada (a análise é uma por geração).
 
 ## 8. Estratégia de validação
 
@@ -312,8 +389,11 @@ Fakes: `FakeLLM` (roteia pelo marcador `### TAREFA:` do prompt), `FakeTranscribe
 | `REQSCRIBA_MAX_AUDIO_MB` / `REQSCRIBA_MAX_DOCUMENT_MB` | `200` / `20` |
 | `REQSCRIBA_CHUNK_SIZE` / `REQSCRIBA_CHUNK_OVERLAP` | `1000` / `150` |
 | `REQSCRIBA_TRANSCRIPT_WINDOW_CHARS` | `800` |
-| `REQSCRIBA_GENERATION_BATCH_CHARS` | `6000` |
+| `REQSCRIBA_GENERATION_BATCH_CHARS` | `6000` (fontes até esse tamanho vão numa chamada única; para modelos de contexto grande, ex. `300000`) |
 | `REQSCRIBA_RAG_TOP_K` | `4` |
+| `REQSCRIBA_GENERATION_CONTEXT_PASS` | `true` (passada de contexto prévia) |
+| `REQSCRIBA_GENERATION_CONTEXT_CHARS` | `1200` (limite do bloco de contexto nos prompts) |
+| `REQSCRIBA_GENERATION_CONSOLIDATION` | `true` (passada de consolidação) |
 | `REQSCRIBA_CORS_ORIGINS` | `http://localhost:3000,http://localhost:5173` |
 | `REQSCRIBA_LOG_LEVEL` | `INFO` |
 

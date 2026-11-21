@@ -76,6 +76,14 @@ class ChangeOrigin(LabeledEnum):
     AI_SUGGESTION_EDITED = "sugestao_ia_editada"
 
 
+class AnalysisItemType(LabeledEnum):
+    PARTICIPANT = "participante"
+    USER = "usuario"
+    BUSINESS_REQUIREMENT = "requisito_negocio"
+    FUNCTIONALITY = "funcionalidade"
+    OUT_OF_SCOPE = "fora_de_escopo"
+
+
 AUDIO_STATUS_LABELS = {
     SourceStatus.PENDING: "Aguardando transcrição",
     SourceStatus.PROCESSING: "Transcrição em andamento",
@@ -117,11 +125,16 @@ LABELS: dict[Enum, str] = {
     ChangeOrigin.MANUAL_EDIT: "Edição manual",
     ChangeOrigin.AI_SUGGESTION: "Sugestão da IA aplicada",
     ChangeOrigin.AI_SUGGESTION_EDITED: "Sugestão da IA editada e aplicada",
+    AnalysisItemType.PARTICIPANT: "Participante da reunião",
+    AnalysisItemType.USER: "Usuário do sistema",
+    AnalysisItemType.BUSINESS_REQUIREMENT: "Requisito de negócio",
+    AnalysisItemType.FUNCTIONALITY: "Funcionalidade",
+    AnalysisItemType.OUT_OF_SCOPE: "Fora de escopo",
 }
 
 ALL_LABELED_ENUMS = (
     SourceStatus, StoryStatus, QuestionStatus, SuggestionStatus, SuggestionType,
-    JobStatus, JobType, SourceType, ChangeType, ChangeOrigin,
+    JobStatus, JobType, SourceType, ChangeType, ChangeOrigin, AnalysisItemType,
 )
 
 

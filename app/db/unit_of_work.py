@@ -5,6 +5,7 @@ from __future__ import annotations
 from types import TracebackType
 
 from app.db.database import Database
+from app.repositories.analyses import AnalysisItemRepository, AnalysisRepository
 from app.repositories.projects import ProjectRepository
 from app.repositories.sources import (
     AudioRepository,
@@ -39,6 +40,8 @@ class UnitOfWork:
         self.questions = QuestionRepository(self.conn)
         self.suggestions = UpdateSuggestionRepository(self.conn)
         self.jobs = JobRepository(self.conn)
+        self.analyses = AnalysisRepository(self.conn)
+        self.analysis_items = AnalysisItemRepository(self.conn)
 
     def commit(self) -> None:
         self.conn.commit()

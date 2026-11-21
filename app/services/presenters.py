@@ -8,7 +8,7 @@ from typing import Any
 from app.core.time import format_seconds
 from app.domain import qus
 from app.domain.enums import (
-    AUDIO_STATUS_LABELS, ChangeOrigin, ChangeType, JobStatus, JobType, QuestionStatus, SourceStatus,
+    AUDIO_STATUS_LABELS, AnalysisItemType, ChangeOrigin, ChangeType, JobStatus, JobType, QuestionStatus, SourceStatus,
     SourceType, StoryStatus, SuggestionStatus, SuggestionType, label_of,
 )
 from app.domain.text import unified_diff
@@ -93,11 +93,17 @@ def chunk(c: dict, score: float | None = None) -> dict:
 
 # -- Evidências -------------------------------------------------------------
 def evidence(e: dict) -> dict:
-    loc = e["localizacao"] or {}
+    return {
+        "evidencia_id": e["id"], **source_excerpt(e), "origem": e["origem"], "criado_em": e["criado_em"],
+    }
+
+
+def source_excerpt(e: dict) -> dict:
+    """Trecho de fonte com localização formatada; serve a evidências gravadas e às de sugestões."""
+    loc = e.get("localizacao") or {}
     base = {
-        "evidencia_id": e["id"], "tipo_fonte": e["tipo_fonte"], "nome_arquivo": e["nome_arquivo"],
-        "trecho": e["trecho"], "trecho_id": e["trecho_id"], "afirmacao": e["afirmacao"],
-        "origem": e["origem"], "criado_em": e["criado_em"],
+        "tipo_fonte": e["tipo_fonte"], "nome_arquivo": e["nome_arquivo"], "trecho": e["trecho"],
+        "trecho_id": e.get("trecho_id"), "afirmacao": e.get("afirmacao"),
     }
     if e["tipo_fonte"] == SourceType.AUDIO.value:
         start = loc.get("inicio_segundos")
@@ -114,8 +120,8 @@ def evidence(e: dict) -> dict:
     return base
 
 
-def split_evidences(evidences: list[dict]) -> tuple[list[dict], list[dict]]:
-    presented = [evidence(e) for e in evidences]
+def split_evidences(evidences: list[dict], present=None) -> tuple[list[dict], list[dict]]:
+    presented = [(present or evidence)(e) for e in evidences]
     return (
         [e for e in presented if e["tipo_fonte"] == SourceType.AUDIO.value],
         [e for e in presented if e["tipo_fonte"] == SourceType.DOCUMENT.value],
@@ -217,7 +223,9 @@ def comparison(current: dict | None, proposed: dict) -> dict:
 
 
 def suggestion(sg: dict, s: dict | None, with_comparison: bool = True) -> dict:
+    audio, documents = split_evidences(sg["evidencias"] or [], source_excerpt)
     data = {
+        "fontes_audio": audio, "fontes_documentos": documents,
         "id": sg["id"], "projeto_id": sg["projeto_id"], "historia_id": sg["historia_id"],
         "historia_codigo": s["codigo"] if s else None, "tipo": sg["tipo"],
         "tipo_rotulo": label_of(SuggestionType, sg["tipo"]), "justificativa": sg["justificativa"],
@@ -240,6 +248,40 @@ def job(j: dict) -> dict:
         "parametros": j["parametros"], "resultado": j["resultado"], "mensagem_erro": j["mensagem_erro"],
         "criado_em": j["criado_em"], "atualizado_em": j["atualizado_em"], "concluido_em": j["concluido_em"],
         "url_status": f"{API_PREFIX}/jobs/{j['id']}",
+    }
+
+
+# -- Análise das fontes ------------------------------------------------------
+def analysis_evidence(spec: dict) -> dict:
+    """Evidência de item de análise (cópia do trecho real), no mesmo formato de `chunk`."""
+    data = chunk({
+        "id": spec["trecho_id"], "tipo_fonte": spec["tipo_fonte"], "fonte_id": spec["fonte_id"],
+        "nome_arquivo": spec["nome_arquivo"], "posicao": None, "texto": spec["trecho"],
+        "localizacao": spec["localizacao"] or {},
+    })
+    data.pop("posicao")
+    return data
+
+
+def analysis_item(i: dict) -> dict:
+    return {
+        "id": i["id"], "analise_id": i["analise_id"], "tipo": i["tipo"],
+        "tipo_rotulo": label_of(AnalysisItemType, i["tipo"]), "codigo": i["codigo"], "texto": i["texto"],
+        "complemento": i["complemento"], "referencias": i["referencias"],
+        "evidencias": [analysis_evidence(e) for e in i["evidencias"]], "possui_evidencia": bool(i["evidencias"]),
+        "historia_ids": i["historia_ids"], "origem": i["origem"], "editado": bool(i["editado"]),
+        "posicao": i["posicao"], "criado_em": i["criado_em"], "atualizado_em": i["atualizado_em"],
+    }
+
+
+def analysis(a: dict, items: list[dict]) -> dict:
+    return {
+        "id": a["id"], "projeto_id": a["projeto_id"], "job_id": a["job_id"], "origem": a["origem"],
+        "sistema": a["sistema"], "fontes": a["fontes"], "revisada": bool(a["revisada"]),
+        "revisada_por": a["revisada_por"], "revisada_em": a["revisada_em"],
+        "totais": {t.value: sum(1 for i in items if i["tipo"] == t.value) for t in AnalysisItemType},
+        "itens": [analysis_item(i) for i in items],
+        "criado_em": a["criado_em"], "atualizado_em": a["atualizado_em"],
     }
 
 

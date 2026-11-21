@@ -17,7 +17,11 @@ from app.llm import parsing, prompts
 from app.services import presenters
 from app.services.common import require_project
 from app.services.evidence import add_evidences, evidence_spec
-from app.services.generation import EXISTING_DUPLICATE_THRESHOLD, deduplicate, extract_candidates, story_key
+from app.services.candidates import EXISTING_DUPLICATE_THRESHOLD, deduplicate, extract_candidates, story_key
+from app.services.consolidation import consolidate
+from app.services.context import MeetingContext, build_context
+from app.services.analysis import reviewed_analysis_text
+from app.services.generation import batch_budget, fits_in_one_call
 from app.services.indexing import source_key
 from app.services.jobs import JobService, validate_sources
 from app.services.retrieval import group_by_chars, label_chunks, related_chunks
@@ -56,13 +60,20 @@ def _analyze_story(container: Container, story: dict, chunks: list[dict]) -> dic
     }
 
 
-def _new_requirements(container: Container, chunks: list[dict], existing: list[dict]) -> list[dict]:
-    """US-14 CA03: trechos sem correspondência viram candidatos a novo requisito."""
+def _new_requirements(
+    container: Container, chunks: list[dict], existing: list[dict], context: MeetingContext | None,
+    reviewed_text: str | None = None,
+) -> tuple[list[dict], dict | None]:
+    """US-14 CA03: trechos sem correspondência viram candidatos a novo requisito (consolidação só com vários lotes)."""
+    batches = group_by_chars(chunks, batch_budget(container, context, reviewed_text))
     candidates = []
-    for batch in group_by_chars(chunks, container.settings.generation_batch_chars):
-        candidates.extend(extract_candidates(container, batch))
+    for batch in batches:
+        candidates.extend(extract_candidates(container, batch, context, reviewed_text))
+    consolidated, consolidation = deduplicate(candidates), None
+    if len(batches) > 1:
+        consolidated, consolidation = consolidate(container, consolidated)
     suggestions = []
-    for c in deduplicate(candidates):
+    for c in consolidated:
         if any(similarity(f"{s['perfil'] or ''} {s['funcionalidade'] or ''}", story_key(c)) >= EXISTING_DUPLICATE_THRESHOLD
                for s in existing):
             continue
@@ -75,7 +86,7 @@ def _new_requirements(container: Container, chunks: list[dict], existing: list[d
             },
             "evidencias": c["evidencias"], "chunk_ids": set(),
         })
-    return suggestions
+    return suggestions, consolidation
 
 
 def run_update_analysis(container: Container, job_id: str) -> None:
@@ -98,7 +109,10 @@ def run_update_analysis(container: Container, job_id: str) -> None:
                                                         container.settings.rag_top_k, keys)]
                 for s in stories
             }
-        drafts, used, failures, attempts = [], set(), [], 0
+            reviewed = reviewed_analysis_text(uow, project_id)
+        # contexto só quando as fontes novas não cabem numa chamada; falhas não derrubam o job
+        context = None if fits_in_one_call(container, new_chunks, reviewed) else build_context(container, new_chunks)
+        drafts, used, failures, attempts, consolidation = [], set(), [], 0, None
         for story in stories:
             if not related[story["id"]]:
                 continue
@@ -115,7 +129,8 @@ def run_update_analysis(container: Container, job_id: str) -> None:
         if unmatched:
             attempts += 1
             try:
-                drafts.extend(_new_requirements(container, unmatched, stories))
+                new_drafts, consolidation = _new_requirements(container, unmatched, stories, context, reviewed)
+                drafts.extend(new_drafts)
             except AppError as exc:
                 failures.append({"etapa": "novos_requisitos", "erro": exc.message})
         if attempts and len(failures) == attempts:
@@ -133,6 +148,7 @@ def run_update_analysis(container: Container, job_id: str) -> None:
             JobService(uow).mark(job_id, JobStatus.COMPLETED, result={
                 "sugestoes_criadas": created, "total": len(created), "historias_analisadas": len(stories),
                 "trechos_novos": len(new_chunks), "falhas": failures,
+                "contexto": context.summary() if context else None, "consolidacao": consolidation,
                 "mensagem": None if created else "Nenhuma atualização ou novo requisito identificado nas novas fontes.",
             })
     except AppError as exc:

@@ -12,7 +12,7 @@ from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app import __version__
-from app.api.routers import health, projects, sources, stories, workflow
+from app.api.routers import analyses, health, projects, sources, stories, workflow
 from app.core.config import Settings
 from app.core.container import Container, build_container
 from app.core.errors import AppError
@@ -84,7 +84,7 @@ def create_app(container: Container | None = None, settings: Settings | None = N
         title="ReqScriba API", version=__version__, description=DESCRIPTION, lifespan=lifespan,
         openapi_tags=[
             {"name": "Saúde"}, {"name": "Projetos"}, {"name": "Áudios"}, {"name": "Transcrição"},
-            {"name": "Documentos"}, {"name": "Busca"}, {"name": "Histórias de Usuário"},
+            {"name": "Documentos"}, {"name": "Busca"}, {"name": "Análises"}, {"name": "Histórias de Usuário"},
             {"name": "Rastreabilidade"}, {"name": "Versões"}, {"name": "Qualidade"}, {"name": "Follow-up"},
             {"name": "Atualizações"}, {"name": "Jobs"},
         ],
@@ -114,7 +114,7 @@ def create_app(container: Container | None = None, settings: Settings | None = N
         return response
 
     register_error_handlers(app)
-    for module in (health, projects, sources, stories, workflow):
+    for module in (health, projects, sources, analyses, stories, workflow):
         app.include_router(module.router, prefix=API_PREFIX)
 
     @app.get("/", include_in_schema=False)
