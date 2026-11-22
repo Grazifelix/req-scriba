@@ -113,6 +113,45 @@ def test_project_shows_system_description_of_latest_analysis(container, project_
         assert ProjectService(uow, container).get(project_id)["descricao_sistema"] == "Portal da escola"
 
 
+def test_analysis_is_locked_while_job_runs_and_old_analysis_becomes_read_only(container, project_id, audio_id, document_id):
+    from app.core.errors import ConflictError
+    from app.services.jobs import JobService
+
+    first = analyze(container, project_id, [audio_id])["resultado"]["analise_id"]
+    with container.uow() as uow:  # novo job iniciado e ainda não executado (pendente)
+        job = start_source_analysis(uow, project_id, [], [document_id], "ana")
+    with container.uow() as uow:
+        service = AnalysisService(uow)
+        item = service.detail(first)["itens"][0]
+        for action in (
+            lambda: service.update_item(first, item["id"], {"texto": "x"}),
+            lambda: service.add_item(first, {"tipo": "usuario", "texto": "secretaria"}),
+            lambda: service.delete_item(first, item["id"]),
+            lambda: service.update(first, {"revisada": True}, "ana"),
+            lambda: service.create(project_id, {"sistema": "manual"}, "ana"),
+        ):
+            with pytest.raises(ConflictError) as exc:
+                action()
+            assert exc.value.details["motivo"] == "analise_em_andamento"
+
+    run_source_analysis(container, job["id"])
+    with container.uow() as uow:
+        second = uow.jobs.get(job["id"])["resultado"]["analise_id"]
+        service = AnalysisService(uow)
+        with pytest.raises(ConflictError) as exc:  # edição na análise substituída não chegaria às próximas
+            service.update_item(first, item["id"], {"texto": "x"})
+        assert exc.value.details == {"motivo": "analise_desatualizada", "analise_atual_id": second}
+        assert service.update(second, {"sistema": "Portal"}, "ana")["sistema"] == "Portal"
+        service.delete(first)  # análises antigas podem ser excluídas
+
+    with container.uow() as uow:  # job órfão (API reiniciada) não bloqueia para sempre
+        orphan = start_source_analysis(uow, project_id, [audio_id], [], "ana")
+    with container.uow() as uow:
+        assert JobService(uow).fail_orphaned() == 1
+        assert uow.jobs.get(orphan["id"])["status"] == "erro"
+        AnalysisService(uow).update(second, {"revisada": True}, "ana")
+
+
 def test_empty_analysis_response_saves_nothing(container, project_id, audio_id):
     container.llm.handlers["ANALISE_FONTES"] = lambda p: {"historias": []}
     result = analyze(container, project_id, [audio_id])["resultado"]

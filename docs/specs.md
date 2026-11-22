@@ -307,6 +307,10 @@ frontend usa esses campos para mostrar em quais fontes a IA se baseou.
   lote é mesclada nele: itens do mesmo tipo com o mesmo código da análise anterior ou parecidos (≥ 0,85) viram
   um só (o texto existente é mantido), evidências são unidas e itens novos recebem o próximo `RN`/`FN`. O
   resultado é gravado como NOVA análise (`revisada = 0`); a anterior não muda.
+- **Edição bloqueada (`409`):** enquanto houver job `analise_fontes` pendente/processando no projeto, nenhuma
+  análise pode ser editada, aprovada, criada ou excluída (`detalhes.motivo = "analise_em_andamento"`). Só a
+  análise mais recente aceita edição e aprovação (`"analise_desatualizada"`, com `analise_atual_id`). Na
+  inicialização da API, jobs pendentes/processando (órfãos de um reinício) viram `erro`.
 - **Aprovação como pré-requisito:** `POST /historias/gerar` exige uma análise com `revisada = 1` (`analise_id`
   informado ou a aprovada mais recente), senão `422`. Ela entra no prompt de histórias como "ANALISE DO
   PROJETO", descontada do orçamento dos lotes; não é fonte e não pode ser citada. Depois da criação das HU,

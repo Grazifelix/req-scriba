@@ -69,3 +69,13 @@ class JobRepository(BaseRepository):
 
     def list_by_project(self, project_id: int) -> list[dict[str, Any]]:
         return self._select("projeto_id = ?", (project_id,), order="criado_em DESC")
+
+    def list_unfinished(self) -> list[dict[str, Any]]:
+        return self._select("status IN ('pendente', 'processando')")
+
+    def has_active(self, project_id: int, job_type: str) -> bool:
+        row = self.conn.execute(
+            "SELECT 1 FROM jobs WHERE projeto_id = ? AND tipo = ? AND status IN ('pendente', 'processando') LIMIT 1",
+            (project_id, job_type),
+        ).fetchone()
+        return row is not None

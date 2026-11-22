@@ -16,6 +16,7 @@ from app.api.routers import analyses, health, projects, sources, stories, workfl
 from app.core.config import Settings
 from app.core.container import Container, build_container
 from app.core.errors import AppError
+from app.services.jobs import JobService
 
 logger = logging.getLogger("app")
 
@@ -78,6 +79,10 @@ def create_app(container: Container | None = None, settings: Settings | None = N
     async def lifespan(app: FastAPI):
         if not hasattr(app.state, "container"):
             app.state.container = build_container(settings)
+            with app.state.container.uow() as uow:
+                orphaned = JobService(uow).fail_orphaned()
+            if orphaned:
+                logger.warning("%d job(s) interrompido(s) por reinício da API marcado(s) como erro.", orphaned)
         yield
 
     app = FastAPI(

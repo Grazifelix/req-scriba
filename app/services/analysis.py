@@ -12,10 +12,10 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from app.core.errors import BusinessValidationError, NotFoundError
+from app.core.errors import BusinessValidationError, ConflictError, NotFoundError
 from app.core.time import utc_now_iso
 from app.db.unit_of_work import UnitOfWork
-from app.domain.enums import AnalysisItemType, SourceType
+from app.domain.enums import AnalysisItemType, JobType, SourceType
 from app.domain.text import similarity
 from app.llm.parsing import ANALYSIS_CODE_PREFIX
 from app.services import presenters
@@ -209,6 +209,26 @@ class AnalysisService:
             raise NotFoundError.for_entity("Análise", analysis_id)
         return analysis
 
+    def _require_no_running_analysis(self, project_id: int) -> None:
+        """O job de análise copia a análise atual no início e grava uma nova no fim: edições feitas no meio
+        ficariam de fora da nova análise sem aviso. Por isso, nada muda enquanto ele roda."""
+        if self.uow.jobs.has_active(project_id, JobType.SOURCE_ANALYSIS.value):
+            raise ConflictError(
+                "Há uma análise das fontes em andamento neste projeto. Aguarde a conclusão para editar a análise.",
+                {"motivo": "analise_em_andamento"},
+            )
+
+    def _require_editable(self, analysis: dict) -> None:
+        """Só a análise mais recente pode ser editada: edições numa anterior não chegariam às próximas
+        atualizações, que partem sempre da mais recente."""
+        self._require_no_running_analysis(analysis["projeto_id"])
+        latest = self.uow.analyses.latest(analysis["projeto_id"])
+        if latest and latest["id"] != analysis["id"]:
+            raise ConflictError(
+                "Esta análise foi substituída por uma mais recente. Abra a análise atual para editar.",
+                {"motivo": "analise_desatualizada", "analise_atual_id": latest["id"]},
+            )
+
     def _present(self, analysis: dict) -> dict:
         return presenters.analysis(analysis, self.uow.analysis_items.list_by_analysis(analysis["id"]))
 
@@ -224,6 +244,7 @@ class AnalysisService:
 
     def create(self, project_id: int, data: dict, actor: str) -> dict:
         require_project(self.uow, project_id)
+        self._require_no_running_analysis(project_id)
         now = utc_now_iso()
         analysis_id = self.uow.analyses.insert({
             "projeto_id": project_id, "origem": "manual", "sistema": data.get("sistema"), "fontes": [],
@@ -242,7 +263,7 @@ class AnalysisService:
         })
 
     def update(self, analysis_id: int, data: dict, actor: str) -> dict:
-        self._get(analysis_id)
+        self._require_editable(self._get(analysis_id))
         if "sistema" in data:
             self.uow.analyses.update(analysis_id, {"sistema": data["sistema"]})
         if data.get("revisada") is not None:
@@ -251,7 +272,8 @@ class AnalysisService:
         return self.detail(analysis_id)
 
     def delete(self, analysis_id: int) -> None:
-        self._get(analysis_id)
+        analysis = self._get(analysis_id)
+        self._require_no_running_analysis(analysis["projeto_id"])  # análises antigas podem ser excluídas
         self.uow.analyses.delete(analysis_id)
 
     # -- itens ---------------------------------------------------------------
@@ -281,6 +303,7 @@ class AnalysisService:
 
     def add_item(self, analysis_id: int, data: dict) -> dict:
         analysis = self._get(analysis_id)
+        self._require_editable(analysis)
         kind = data["tipo"]
         now = utc_now_iso()
         item_id = self.uow.analysis_items.insert({
@@ -298,6 +321,7 @@ class AnalysisService:
     def update_item(self, analysis_id: int, item_id: int, data: dict) -> dict:
         analysis = self._get(analysis_id)
         item = self._get_item(analysis_id, item_id)
+        self._require_editable(analysis)
         changes: dict[str, Any] = {k: data[k] for k in ("texto", "complemento") if k in data}
         if data.get("referencias") is not None:
             changes["referencias"] = self._references(analysis_id, item["tipo"], data["referencias"])
@@ -309,8 +333,9 @@ class AnalysisService:
         return presenters.analysis_item(self.uow.analysis_items.get(item_id))
 
     def delete_item(self, analysis_id: int, item_id: int) -> None:
-        self._get(analysis_id)
+        analysis = self._get(analysis_id)
         item = self._get_item(analysis_id, item_id)
+        self._require_editable(analysis)
         self.uow.analysis_items.delete(item_id)
         if item["tipo"] == BUSINESS_REQUIREMENT and item["codigo"]:
             for other in self.uow.analysis_items.list_by_analysis(analysis_id):  # remove referências pendentes

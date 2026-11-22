@@ -69,3 +69,11 @@ class JobService:
         if status in (JobStatus.COMPLETED, JobStatus.ERROR):
             values["concluido_em"] = now
         self.uow.jobs.update(job_id, values)
+
+    def fail_orphaned(self) -> int:
+        """Na inicialização da API: jobs ainda pendentes/processando ficaram sem tarefa (rodam no processo da
+        API) e viram 'erro'. Sem isso, um job órfão bloquearia para sempre a edição da análise do projeto."""
+        orphaned = self.uow.jobs.list_unfinished()
+        for job in orphaned:
+            self.mark(job["id"], JobStatus.ERROR, error="Interrompido: a API foi reiniciada antes do fim do processamento.")
+        return len(orphaned)
