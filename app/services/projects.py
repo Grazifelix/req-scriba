@@ -33,8 +33,10 @@ class ProjectService:
         stories = self.uow.stories.list_by_project(project["id"])
         backlog = [s["id"] for s in stories if s["status"] != StoryStatus.REJECTED.value]
         approved = [s["id"] for s in stories if s["status"] == StoryStatus.APPROVED.value]
+        analysis = self.uow.analyses.latest(project["id"])
         return presenters.project(
-            project, self.uow.projects.counts(project["id"]), overall_quality(stories), backlog, approved
+            project, self.uow.projects.counts(project["id"]), overall_quality(stories), backlog, approved,
+            analysis["sistema"] if analysis else None,
         )
 
     def create(self, titulo: str, descricao: str | None) -> dict:

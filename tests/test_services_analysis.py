@@ -102,6 +102,17 @@ def test_analysis_job_saves_traceable_analysis_without_stories(container, projec
     assert out_of_scope["complemento"] == "tarefa do projeto" and out_of_scope["possui_evidencia"] is False
 
 
+def test_project_shows_system_description_of_latest_analysis(container, project_id, audio_id):
+    from app.services.projects import ProjectService
+
+    with container.uow() as uow:
+        assert ProjectService(uow, container).get(project_id)["descricao_sistema"] is None
+    analysis_id = analyze(container, project_id, [audio_id])["resultado"]["analise_id"]
+    with container.uow() as uow:
+        AnalysisService(uow).update(analysis_id, {"sistema": "Portal da escola"}, "ana")
+        assert ProjectService(uow, container).get(project_id)["descricao_sistema"] == "Portal da escola"
+
+
 def test_empty_analysis_response_saves_nothing(container, project_id, audio_id):
     container.llm.handlers["ANALISE_FONTES"] = lambda p: {"historias": []}
     result = analyze(container, project_id, [audio_id])["resultado"]

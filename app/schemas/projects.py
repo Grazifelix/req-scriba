@@ -29,6 +29,9 @@ class ProjectOut(OutputModel):
     id: int
     titulo: str
     descricao: Optional[str]
+    descricao_sistema: Optional[str] = Field(
+        default=None, description="Campo 'sistema' da análise das fontes mais recente (None sem análise)"
+    )
     total_audios: int
     total_documentos: int
     total_historias_prontas: int = Field(description="Histórias aprovadas")

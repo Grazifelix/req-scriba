@@ -80,7 +80,9 @@ Convenção: colunas em português; JSON armazenado como TEXT; datas ISO-8601 UT
 Campos **derivados** na resposta: `total_audios`, `total_documentos`, `total_historias_prontas`
 (aprovadas), `total_historias_pendentes` (em_revisao + falta_informacao), `total_historias_desaprovadas`,
 `qualidade_geral` (média RN06), `backlog` (ids das HU não desaprovadas, ordenadas por código),
-`backlog_aprovado` (ids das aprovadas).
+`backlog_aprovado` (ids das aprovadas), `descricao_sistema` (campo `sistema` da análise das fontes mais
+recente; `null` sem análise). A interface exibe `descricao_sistema` como descrição do projeto; `descricao`
+continua no contrato, mas não é mais editada pela interface.
 
 ### 3.2 `audios`
 id, projeto_id, nome_arquivo, caminho_arquivo, tipo_conteudo, tamanho_bytes, duracao_segundos,

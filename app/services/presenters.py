@@ -35,9 +35,11 @@ def quality_summary(score: float | None, met: int | None = None, **extra: Any) -
 
 
 # -- Projetos ---------------------------------------------------------------
-def project(p: dict, counts: dict, overall: dict, backlog: list[int], approved: list[int]) -> dict:
+def project(
+    p: dict, counts: dict, overall: dict, backlog: list[int], approved: list[int], system: str | None = None
+) -> dict:
     return {
-        "id": p["id"], "titulo": p["titulo"], "descricao": p["descricao"], **counts,
+        "id": p["id"], "titulo": p["titulo"], "descricao": p["descricao"], "descricao_sistema": system, **counts,
         "qualidade_geral": overall, "backlog": backlog, "backlog_aprovado": approved,
         "criado_em": p["criado_em"], "atualizado_em": p["atualizado_em"],
     }
