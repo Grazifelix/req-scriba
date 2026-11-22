@@ -416,6 +416,7 @@ aprova/edita/rejeita → aplicação gera nova versão + evidências `atualizaca
 | D22 | Análise revisada como contexto confirmado | A análise mais recente com `revisada = true` entra nos prompts de extração (geração e novas fontes) como informação confirmada por humano: papéis de usuário, requisitos de negócio e itens fora de escopo. Ela não é fonte: toda HU continua precisando de rótulos `F`. É descontada do orçamento de cada lote. |
 | D23 | Rótulos estritos e citação conferida | `normalize_label` aceitava "FN1" como "F1" (pega o número), o que daria evidência errada sem aviso. Agora só aceita número que não venha colado a letra ou dígito. Cada HU traz uma `citacao` literal, conferida (ignorando acentos e pontuação) contra o texto dos trechos citados; se não bater, vira `afirmacoes_sem_evidencia`. Lacunas de conjunto (`conflito`, `fluxo_incompleto`) viram `informacoes_ausentes` e, por isso, defeitos e perguntas de follow-up. |
 | D24 | Avaliação QUS em lote como job (`avaliacao_qualidade`) | Cada avaliação faz 1–2 chamadas ao LLM; avaliar várias HU numa requisição estouraria timeouts. O job reaproveita `QualityService.evaluate` com uma transação por história (cada nota é gravada assim que sai), registra falhas por história sem interromper o lote e só fica `erro` se nenhuma for avaliada. O frontend oferece o lote ao fim de uma geração, para as HU recém-criadas. |
+| D25 | Excluir áudio interrompe a transcrição (cancelamento cooperativo) | `Transcriber.transcribe` recebe `should_cancel`, consultado após a decodificação e entre segmentos (o `faster-whisper` gera segmentos sob demanda). O sinal é a própria ausência da linha em `audios`, o que cobre também a exclusão do projeto (cascade) sem estado em memória. O `DELETE` responde na hora; a tarefa para no próximo ponto de checagem (fim do segmento atual ou da VAD inicial) e descarta o resultado, sem marcar `erro`. Antes de gravar os segmentos a existência é conferida de novo (evita violar a FK). Se o arquivo estiver aberto no Windows, `FileStorage.remove` só registra aviso. |
 
 **Dependências e justificativas:** `fastapi`/`uvicorn` (API), `python-multipart` (upload),
 `requests` (provedores de LLM e embeddings, exigido), `chromadb` (vetores, exigido), `pypdf` e `python-docx` (extração
@@ -464,7 +465,7 @@ Cabeçalho opcional `X-Usuario` (responsável pelas alterações; padrão `engen
 | GET | `/audios/{audio_id}/transcricao` | Transcrição completa + segmentos com tempos |
 | GET | `/audios/{audio_id}/transcricao/busca?termo=` | Busca textual nos segmentos |
 | PATCH | `/audios/{audio_id}/segmentos/{segmento_id}` | Corrigir texto de um segmento |
-| DELETE | `/audios/{audio_id}` | Excluir áudio |
+| DELETE | `/audios/{audio_id}` | Excluir áudio (interrompe a transcrição em andamento) |
 
 ### Documentos (US-04, US-13)
 | Método | Rota | Descrição |

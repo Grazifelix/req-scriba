@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from app.core.errors import ExternalServiceError
-from app.integrations.transcriber import TranscribedSegment, TranscriptionResult
+from app.integrations.transcriber import CancelCheck, TranscribedSegment, TranscriptionResult, check_cancelled
 
 Handler = Callable[[str], dict[str, Any]]
 
@@ -102,11 +102,22 @@ class FakeTranscriber:
             TranscribedSegment(9.5, 14.0, "Também é preciso cadastrar novos alunos no início do ano."),
         ]
         self.error: Exception | None = None
+        self.on_segment: Callable[[int], None] | None = None  # gancho: roda após cada segmento inferido
+        self.processed = 0
 
-    def transcribe(self, path: Path) -> TranscriptionResult:
+    def transcribe(self, path: Path, should_cancel: CancelCheck | None = None) -> TranscriptionResult:
+        """Espelha o adaptador real: checa o cancelamento antes de cada segmento."""
         if self.error:
             raise self.error
-        return TranscriptionResult(14.0, "pt", list(self.segments))
+        self.processed = 0
+        result = []
+        for index, segment in enumerate(self.segments):
+            check_cancelled(should_cancel)
+            result.append(segment)
+            self.processed += 1
+            if self.on_segment:
+                self.on_segment(index)
+        return TranscriptionResult(14.0, "pt", result)
 
     def health(self) -> dict[str, Any]:
         return {"status": "ok", "modelo": "fake"}

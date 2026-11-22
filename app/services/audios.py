@@ -13,6 +13,7 @@ from app.db.unit_of_work import UnitOfWork
 from app.domain.enums import SourceStatus, SourceType
 from app.domain.text import contains_normalized
 from app.integrations.storage import AUDIO_EXTENSIONS
+from app.integrations.transcriber import TranscriptionCancelled
 from app.services import presenters
 from app.services.common import require_audio, require_project
 from app.services.indexing import index_audio, remove_source_chunks
@@ -117,10 +118,15 @@ def transcribe_audio(container: Container, audio_id: int) -> None:
         uow.audios.update(audio_id, {"status": SourceStatus.PROCESSING.value, "atualizado_em": utc_now_iso()})
     try:
         path = container.storage.resolve(audio["caminho_arquivo"])
-        result = container.transcriber.transcribe(path)
+        # Excluir o áudio (ou o projeto) interrompe a transcrição no próximo segmento.
+        result = container.transcriber.transcribe(path, should_cancel=lambda: _audio_deleted(container, audio_id))
         if not result.segments:
             raise BusinessValidationError("Nenhuma fala foi identificada na gravação.")
         with container.uow() as uow:
+            audio = uow.audios.get(audio_id)
+            if not audio:  # excluído (ou o projeto) durante a transcrição: descarta o resultado
+                logger.info("Áudio %s excluído durante a transcrição; resultado descartado", audio_id)
+                return
             uow.segments.delete_by_audio(audio_id)
             now = utc_now_iso()
             for position, seg in enumerate(result.segments):
@@ -134,11 +140,18 @@ def transcribe_audio(container: Container, audio_id: int) -> None:
                 "status": SourceStatus.COMPLETED.value, "mensagem_erro": None, "processado_em": now,
                 "duracao_segundos": result.duration_seconds or result.segments[-1].end, "atualizado_em": now,
             })
+    except TranscriptionCancelled:
+        logger.info("Transcrição do áudio %s interrompida: áudio excluído", audio_id)
     except AppError as exc:
         _mark_error(container, audio_id, exc.message)
     except Exception as exc:  # falha inesperada: registra e expõe mensagem genérica
         logger.exception("Falha inesperada ao transcrever áudio %s", audio_id)
         _mark_error(container, audio_id, f"Erro inesperado no processamento: {type(exc).__name__}")
+
+
+def _audio_deleted(container: Container, audio_id: int) -> bool:
+    with container.uow() as uow:
+        return uow.audios.get(audio_id) is None
 
 
 def _mark_error(container: Container, audio_id: int, message: str) -> None:

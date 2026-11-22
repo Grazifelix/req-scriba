@@ -6,7 +6,7 @@ import logging
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any, Callable, Protocol
 
 from app.core.errors import ExternalServiceError
 
@@ -17,6 +17,17 @@ INSTALL_HINT = (
     "(pip install -r requirements-asr.txt) e use 'reprocessar'."
 )
 SAMPLING_RATE = 16000
+
+CancelCheck = Callable[[], bool]
+
+
+class TranscriptionCancelled(Exception):
+    """A transcrição foi interrompida porque ``should_cancel`` passou a devolver ``True``."""
+
+
+def check_cancelled(should_cancel: CancelCheck | None) -> None:
+    if should_cancel is not None and should_cancel():
+        raise TranscriptionCancelled
 
 
 @dataclass
@@ -54,7 +65,7 @@ def decode_audio(path: Path, sampling_rate: int = SAMPLING_RATE):
 
 
 class Transcriber(Protocol):
-    def transcribe(self, path: Path) -> TranscriptionResult: ...
+    def transcribe(self, path: Path, should_cancel: CancelCheck | None = None) -> TranscriptionResult: ...
     def health(self) -> dict[str, Any]: ...
 
 
@@ -78,13 +89,23 @@ class FasterWhisperTranscriber:
             self._model = WhisperModel(self.model_size, device=self.device, compute_type=self.compute_type)
         return self._model
 
-    def transcribe(self, path: Path) -> TranscriptionResult:
+    def transcribe(self, path: Path, should_cancel: CancelCheck | None = None) -> TranscriptionResult:
+        """Transcreve o áudio; ``should_cancel`` é consultado entre segmentos para interromper cedo."""
         model = self._load()
         started = time.perf_counter()
         try:
             audio = decode_audio(path)
+            check_cancelled(should_cancel)
+            # ``segments`` é um gerador preguiçoso: cada segmento só é inferido ao ser iterado.
             segments, info = model.transcribe(audio, language=self.language, vad_filter=True)
-            result = [TranscribedSegment(s.start, s.end, s.text.strip()) for s in segments if s.text.strip()]
+            result = []
+            for s in segments:
+                check_cancelled(should_cancel)
+                if s.text.strip():
+                    result.append(TranscribedSegment(s.start, s.end, s.text.strip()))
+        except TranscriptionCancelled:
+            logger.info("Transcrição cancelada após %.1fs", time.perf_counter() - started)
+            raise
         except Exception as exc:  # erros de decodificação de áudio variam por formato
             raise ExternalServiceError(f"Falha ao transcrever o áudio: {exc}") from exc
         logger.info("Transcrição concluída em %.1fs (%d segmentos)", time.perf_counter() - started, len(result))

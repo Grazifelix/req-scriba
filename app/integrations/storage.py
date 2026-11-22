@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import re
 import uuid
 from dataclasses import dataclass
@@ -9,6 +10,8 @@ from pathlib import Path
 from typing import BinaryIO, Callable
 
 from app.core.errors import BusinessValidationError
+
+logger = logging.getLogger(__name__)
 
 CHUNK_BYTES = 1024 * 1024
 
@@ -133,3 +136,5 @@ class FileStorage:
             self.resolve(stored_path).unlink(missing_ok=True)
         except BusinessValidationError:
             pass  # caminho fora da raiz nunca é removido
+        except OSError as exc:  # ex.: Windows com o arquivo aberto por uma transcrição em andamento
+            logger.warning("Não foi possível remover o arquivo %s: %s", stored_path, exc)

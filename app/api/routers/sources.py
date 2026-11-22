@@ -91,7 +91,9 @@ def update_segment(audio_id: int, segmento_id: int, body: SegmentUpdate, service
     return service.update_segment(audio_id, segmento_id, body.texto)
 
 
-@router.delete("/audios/{audio_id}", status_code=status.HTTP_204_NO_CONTENT, tags=["Áudios"], summary="Excluir áudio")
+@router.delete("/audios/{audio_id}", status_code=status.HTTP_204_NO_CONTENT, tags=["Áudios"], summary="Excluir áudio",
+               description="Remove o áudio, a transcrição e os trechos indexados. Se a transcrição estiver em "
+                           "andamento, ela é interrompida no próximo segmento e o resultado é descartado.")
 def delete_audio(audio_id: int, service: AudioService = Depends(_audios)):
     service.delete(audio_id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)

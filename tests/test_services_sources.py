@@ -1,6 +1,7 @@
 """US-01..US-04: fontes, transcrição, revisão e documentos."""
 
 import io
+from pathlib import Path
 
 import pytest
 
@@ -107,6 +108,53 @@ def test_unexpected_transcription_error_is_persisted(container, project_id):
     transcribe_audio(container, audio_id)
     with container.uow() as uow:
         assert "RuntimeError" in AudioService(uow, container).get(audio_id)["mensagem_erro"]
+
+
+def _transcribe_deleting_midway(container, project_id, delete):
+    """Exclui (via ``delete``) logo após o 1º segmento e roda a transcrição até o fim."""
+    with container.uow() as uow:
+        audio_id = AudioService(uow, container).upload(project_id, "a.wav", None, io.BytesIO(WAV_BYTES))["id"]
+
+    def delete_after_first(index):
+        if index == 0:
+            with container.uow() as uow:
+                delete(uow, audio_id)
+
+    container.transcriber.on_segment = delete_after_first
+    transcribe_audio(container, audio_id)  # não deve violar a FK de segmentos nem marcar erro
+    return audio_id
+
+
+def test_deleting_audio_during_transcription_stops_it(container, project_id):
+    audio_id = _transcribe_deleting_midway(
+        container, project_id, lambda uow, a: AudioService(uow, container).delete(a)
+    )
+    assert container.transcriber.processed == 1  # os demais segmentos não foram inferidos
+    with container.uow() as uow:
+        assert uow.audios.get(audio_id) is None
+        assert uow.segments.list_by_audio(audio_id) == []
+        assert not [c for c in uow.chunks.list_all() if c["tipo_fonte"] == "audio" and c["fonte_id"] == audio_id]
+
+
+def test_deleting_project_during_transcription_stops_it(container, project_id):
+    audio_id = _transcribe_deleting_midway(
+        container, project_id, lambda uow, _: ProjectService(uow, container).delete(project_id)
+    )
+    assert container.transcriber.processed == 1
+    with container.uow() as uow:
+        assert uow.audios.get(audio_id) is None and uow.projects.get(project_id) is None
+
+
+def test_removing_locked_file_does_not_fail(container, project_id, monkeypatch):
+    with container.uow() as uow:
+        audio_id = AudioService(uow, container).upload(project_id, "a.wav", None, io.BytesIO(WAV_BYTES))["id"]
+        stored_path = uow.audios.get(audio_id)["caminho_arquivo"]
+
+    def locked(self, missing_ok=False):
+        raise PermissionError("arquivo em uso")
+
+    monkeypatch.setattr(Path, "unlink", locked)
+    container.storage.remove(stored_path)  # só registra aviso, sem derrubar a exclusão
 
 
 def test_retry_while_pending_is_conflict(container, project_id):
