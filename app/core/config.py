@@ -57,7 +57,7 @@ class Settings:
     whisper_device: str = field(default_factory=lambda: _env("WHISPER_DEVICE", "cpu"))
     whisper_compute_type: str = field(default_factory=lambda: _env("WHISPER_COMPUTE_TYPE", "int8"))
     transcription_language: str = field(default_factory=lambda: _env("TRANSCRIPTION_LANGUAGE", "pt"))
-    max_audio_mb: int = field(default_factory=lambda: _env_int("MAX_AUDIO_MB", 200))
+    max_audio_mb: int = field(default_factory=lambda: _env_int("MAX_AUDIO_MB", 500))
     max_document_mb: int = field(default_factory=lambda: _env_int("MAX_DOCUMENT_MB", 20))
     chunk_size: int = field(default_factory=lambda: _env_int("CHUNK_SIZE", 1000))
     chunk_overlap: int = field(default_factory=lambda: _env_int("CHUNK_OVERLAP", 150))

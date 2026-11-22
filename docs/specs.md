@@ -386,7 +386,7 @@ Fakes: `FakeLLM` (roteia pelo marcador `### TAREFA:` do prompt), `FakeTranscribe
 | `REQSCRIBA_VECTOR_STORE` | `chroma` (`memory` para testes) |
 | `REQSCRIBA_WHISPER_MODEL` / `_DEVICE` / `_COMPUTE_TYPE` | `small` / `cpu` / `int8` |
 | `REQSCRIBA_TRANSCRIPTION_LANGUAGE` | `pt` |
-| `REQSCRIBA_MAX_AUDIO_MB` / `REQSCRIBA_MAX_DOCUMENT_MB` | `200` / `20` |
+| `REQSCRIBA_MAX_AUDIO_MB` / `REQSCRIBA_MAX_DOCUMENT_MB` | `500` / `20` |
 | `REQSCRIBA_CHUNK_SIZE` / `REQSCRIBA_CHUNK_OVERLAP` | `1000` / `150` |
 | `REQSCRIBA_TRANSCRIPT_WINDOW_CHARS` | `800` |
 | `REQSCRIBA_GENERATION_BATCH_CHARS` | `6000` (fontes até esse tamanho vão numa chamada única; para modelos de contexto grande, ex. `300000`) |
