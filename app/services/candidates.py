@@ -2,8 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from app.core.container import Container
 from app.domain.text import contains_normalized, similarity
@@ -18,15 +17,6 @@ DUPLICATE_THRESHOLD = 0.85
 EXISTING_DUPLICATE_THRESHOLD = 0.90
 MAX_CRITERIA = 8
 CITATION_NOT_FOUND = 'Citação não encontrada nos trechos citados: "{}"'
-
-
-@dataclass
-class BatchExtraction:
-    """Resultado de um lote: candidatas (com evidências), análise bruta e mapa rótulo → trechos."""
-
-    candidates: list[dict]
-    analysis: dict[str, Any]
-    sources: dict[str, list[dict]]
 
 
 def story_key(candidate: dict) -> str:
@@ -56,21 +46,31 @@ def _apply_set_gaps(stories: list[dict], gaps: list[dict]) -> None:
                 target["informacoes_ausentes"].append(entry)
 
 
+def labeled_sources(
+    batch: list[dict], context: MeetingContext | None
+) -> tuple[list[dict], dict[str, list[dict]], str | None]:
+    """Rótulos F do lote + rótulos R do contexto: (blocos do prompt, rótulo → trechos, texto do contexto)."""
+    blocks, mapping = label_chunks(batch)
+    sources = {label: [chunk] for label, chunk in mapping.items()}
+    if context and context.items:
+        sources.update(context.chunk_map())
+        return blocks, sources, context.text()
+    return blocks, sources, None
+
+
 def extract_batch(
     container: Container,
     batch: list[dict],
     context: MeetingContext | None = None,
-    reviewed_text: str | None = None,
+    analysis_text: str | None = None,
     complete: bool = False,
-) -> BatchExtraction:
-    """Chama o LLM para um lote e converte rótulos citados em especificações de evidência."""
-    blocks, mapping = label_chunks(batch)
-    sources = {label: [chunk] for label, chunk in mapping.items()}
-    context_text = None
-    if context and context.items:
-        sources.update(context.chunk_map())
-        context_text = context.text()
-    prompt = prompts.extraction_prompt(blocks, context_text, reviewed_text, complete)
+) -> list[dict]:
+    """Chama o LLM de histórias para um lote e converte rótulos citados em especificações de evidência.
+
+    Cada candidata mantém "funcionalidade_ref" (código FN da ANALISE DO PROJETO citado pelo modelo).
+    """
+    blocks, sources, context_text = labeled_sources(batch, context)
+    prompt = prompts.extraction_prompt(blocks, context_text, analysis_text, complete)
     result = parsing.normalize_extraction_result(container.llm.generate_json(prompts.SYSTEM, prompt), set(sources))
     stories = result["historias"]
     _apply_set_gaps(stories, result["lacunas"])
@@ -78,14 +78,14 @@ def extract_batch(
         _check_citation(story, sources)
         story.pop("ref", None)
         story["evidencias"] = specs_for_labels(story.pop("fontes"), sources)
-    return BatchExtraction(stories, result["analise"], sources)
+    return stories
 
 
 def extract_candidates(
-    container: Container, batch: list[dict], context: MeetingContext | None = None, reviewed_text: str | None = None
+    container: Container, batch: list[dict], context: MeetingContext | None = None, analysis_text: str | None = None
 ) -> list[dict]:
-    """Somente as candidatas de um lote (análise de novas fontes)."""
-    candidates = extract_batch(container, batch, context, reviewed_text).candidates
+    """Somente as candidatas de um lote (análise de novas fontes), sem a ligação com as funcionalidades."""
+    candidates = extract_batch(container, batch, context, analysis_text)
     for candidate in candidates:
         candidate.pop("funcionalidade_ref", None)
     return candidates

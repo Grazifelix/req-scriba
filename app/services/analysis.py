@@ -1,8 +1,9 @@
 """Análise das fontes: como a IA entendeu a reunião (sistema, usuários, requisitos de negócio,
 funcionalidades e itens fora de escopo).
 
-Cada geração de histórias grava uma análise. O analista revisa e edita os itens; a análise mais recente
-marcada como revisada entra como contexto confirmado nas próximas extrações. As evidências dos itens são
+A análise é gerada por um job próprio (``app.services.source_analysis``), antes e independentemente da geração
+de histórias; com novas fontes, ela atualiza a análise mais recente e grava uma nova. O analista revisa, edita
+e aprova (``revisada``); só a análise aprovada orienta a geração de histórias. As evidências dos itens são
 cópias dos trechos reais do banco (nunca texto do LLM).
 """
 
@@ -35,14 +36,30 @@ def _next_code(items: list[dict], kind: str) -> str | None:
     return f"{prefix}{max(numbers, default=0) + 1}"
 
 
+ITEM_FIELDS = ("tipo", "codigo", "texto", "complemento", "referencias", "evidencias", "historia_ids", "origem", "editado")
+
+
 class AnalysisBuilder:
-    """Junta as análises de um ou mais lotes: mescla itens parecidos e renumera RN/FN globalmente."""
+    """Junta as análises de um ou mais lotes: mescla itens parecidos e renumera RN/FN globalmente.
+
+    Semeado com a análise anterior (``seed``), mantém os itens, códigos e edições dela e acrescenta os novos.
+    """
 
     def __init__(self) -> None:
         self.sistema: str | None = None
         self.items: list[dict] = []
+        self.seeded: list[dict] = []
+
+    def seed(self, analysis: dict, items: list[dict]) -> None:
+        self.sistema = analysis.get("sistema")
+        self.seeded = [{k: item[k] for k in ITEM_FIELDS} for item in items]
+        self.items = list(self.seeded)
 
     def _match(self, item: dict) -> dict | None:
+        if item["codigo"]:  # o prompt de atualização pede para manter os códigos da análise anterior
+            same_code = next((i for i in self.seeded if i["tipo"] == item["tipo"] and i["codigo"] == item["codigo"]), None)
+            if same_code and similarity(same_code["texto"], item["texto"]) >= SIMILAR_ITEM_THRESHOLD / 2:
+                return same_code
         return next(
             (i for i in self.items
              if i["tipo"] == item["tipo"] and similarity(i["texto"], item["texto"]) >= SIMILAR_ITEM_THRESHOLD),
@@ -60,6 +77,7 @@ class AnalysisBuilder:
                 target = {
                     "tipo": item["tipo"], "codigo": _next_code(self.items, item["tipo"]), "texto": item["texto"],
                     "complemento": item["complemento"], "referencias": [], "evidencias": [], "historia_ids": [],
+                    "origem": "ia", "editado": 0,
                 }
                 self.items.append(target)
             else:
@@ -77,11 +95,6 @@ class AnalysisBuilder:
                     target["referencias"].append(code)
         return code_map
 
-    def link_story(self, codes: list[str], story_id: int) -> None:
-        for item in self.items:
-            if item["tipo"] == FUNCTIONALITY and item["codigo"] in codes and story_id not in item["historia_ids"]:
-                item["historia_ids"].append(story_id)
-
     def is_empty(self) -> bool:
         return not self.sistema and not self.items
 
@@ -93,23 +106,44 @@ def _source_refs(uow: UnitOfWork, audio_ids: list[int], document_ids: list[int])
 
 
 def save_generated_analysis(
-    uow: UnitOfWork, project_id: int, job_id: str, builder: AnalysisBuilder, audio_ids: list[int], document_ids: list[int]
+    uow: UnitOfWork, project_id: int, job_id: str, builder: AnalysisBuilder, audio_ids: list[int],
+    document_ids: list[int], previous_sources: list[dict] | None = None,
 ) -> int | None:
-    """Grava a análise de uma geração. Retorna o id, ou None quando o modelo não devolveu análise."""
+    """Grava uma nova análise (não revisada). Retorna o id, ou None quando o modelo não devolveu análise.
+
+    ``previous_sources``: fontes da análise anterior que esta atualiza; ficam registradas junto das novas.
+    """
     if builder.is_empty():
         return None
     now = utc_now_iso()
+    sources = list(previous_sources or [])
+    known = {(s["tipo_fonte"], s["fonte_id"]) for s in sources}
+    sources += [s for s in _source_refs(uow, audio_ids, document_ids) if (s["tipo_fonte"], s["fonte_id"]) not in known]
     analysis_id = uow.analyses.insert({
         "projeto_id": project_id, "job_id": job_id, "origem": "ia", "sistema": builder.sistema,
-        "fontes": _source_refs(uow, audio_ids, document_ids), "revisada": 0, "criado_em": now, "atualizado_em": now,
+        "fontes": sources, "revisada": 0, "criado_em": now, "atualizado_em": now,
     })
     ordered = sorted(builder.items, key=lambda i: TYPE_ORDER.index(i["tipo"]))
     for position, item in enumerate(ordered):
         uow.analysis_items.insert({
-            **item, "analise_id": analysis_id, "origem": "ia", "editado": 0, "posicao": position,
+            **{k: item[k] for k in ITEM_FIELDS}, "analise_id": analysis_id, "posicao": position,
             "criado_em": now, "atualizado_em": now,
         })
     return analysis_id
+
+
+def functionality_codes(uow: UnitOfWork, analysis_id: int) -> set[str]:
+    return {i["codigo"] for i in uow.analysis_items.list_by_analysis(analysis_id) if i["tipo"] == FUNCTIONALITY and i["codigo"]}
+
+
+def link_stories(uow: UnitOfWork, analysis_id: int, links: list[tuple[list[str], int]]) -> None:
+    """Registra nas funcionalidades (FN) da análise as histórias geradas a partir delas."""
+    for item in uow.analysis_items.list_by_analysis(analysis_id):
+        if item["tipo"] != FUNCTIONALITY:
+            continue
+        new = [sid for codes, sid in links if item["codigo"] in codes and sid not in item["historia_ids"]]
+        if new:
+            uow.analysis_items.update(item["id"], {"historia_ids": item["historia_ids"] + new})
 
 
 REVIEWED_SECTIONS = [
@@ -129,9 +163,8 @@ def _reviewed_line(item: dict) -> str:
     return f"- {code}{item['texto']}{extra}"
 
 
-def reviewed_analysis_text(uow: UnitOfWork, project_id: int) -> str | None:
-    """Texto da análise revisada mais recente do projeto para o prompt de extração (None se não houver)."""
-    analysis = uow.analyses.latest_reviewed(project_id)
+def analysis_text(uow: UnitOfWork, analysis: dict | None) -> str | None:
+    """Texto de uma análise para os prompts (ANALISE DO PROJETO / ANÁLISE ATUAL). None se vazia."""
     if not analysis:
         return None
     items = uow.analysis_items.list_by_analysis(analysis["id"])
@@ -141,6 +174,26 @@ def reviewed_analysis_text(uow: UnitOfWork, project_id: int) -> str | None:
         if group:
             lines += [f"{title}:", *group]
     return "\n".join(lines) or None
+
+
+def approved_analysis(uow: UnitOfWork, project_id: int, analysis_id: int | None = None) -> dict:
+    """Análise aprovada usada na geração de histórias: a informada ou a aprovada mais recente do projeto."""
+    if analysis_id is None:
+        analysis = uow.analyses.latest_reviewed(project_id)
+        if not analysis:
+            raise BusinessValidationError(
+                "Revise e aprove a análise das fontes antes de gerar histórias.",
+                {"motivo": "sem_analise_aprovada"},
+            )
+        return analysis
+    analysis = uow.analyses.get(analysis_id)
+    if not analysis or analysis["projeto_id"] != project_id:
+        raise NotFoundError.for_entity("Análise", analysis_id)
+    if not analysis["revisada"]:
+        raise BusinessValidationError(
+            "A análise informada ainda não foi aprovada pelo analista.", {"analise_id": analysis_id}
+        )
+    return analysis
 
 
 class AnalysisService:

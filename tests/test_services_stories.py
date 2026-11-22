@@ -7,9 +7,11 @@ from app.domain.enums import StoryStatus
 from app.services.generation import run_generation, start_generation
 from app.services.projects import ProjectService
 from app.services.stories import StoryService
+from tests.conftest import ensure_approved_analysis
 
 
 def generate(container, project_id, audio_ids=(), document_ids=()):
+    ensure_approved_analysis(container, project_id)
     with container.uow() as uow:
         job = start_generation(uow, project_id, list(audio_ids), list(document_ids), "ana")
     assert job["status"] == "pendente"

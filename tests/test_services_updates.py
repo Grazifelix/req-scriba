@@ -7,7 +7,7 @@ from app.domain.enums import StoryStatus
 from app.services.generation import run_generation, start_generation
 from app.services.stories import StoryService
 from app.services.updates import UpdateService, run_update_analysis, start_analysis
-from tests.conftest import upload_audio, upload_document
+from tests.conftest import ensure_approved_analysis, upload_audio, upload_document
 
 NEW_DOC = (
     "Ata da segunda entrevista: o boletim será disponibilizado em PDF para download.\n\n"
@@ -17,6 +17,7 @@ NEW_DOC = (
 
 @pytest.fixture
 def approved_story(container, project_id, audio_id):
+    ensure_approved_analysis(container, project_id)
     with container.uow() as uow:
         job = start_generation(uow, project_id, [audio_id], [], "ana")
     run_generation(container, job["id"])

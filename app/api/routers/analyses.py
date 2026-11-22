@@ -1,16 +1,20 @@
-"""Rotas da análise das fontes: revisão humana de como a IA entendeu a reunião."""
+"""Rotas da análise das fontes: geração (job), revisão e aprovação humana de como a IA entendeu a reunião."""
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Response, status
+from fastapi import APIRouter, BackgroundTasks, Depends, Response, status
 
-from app.api.deps import get_actor, get_uow
+from app.api.deps import get_actor, get_container, get_uow
+from app.core.container import Container
 from app.db.unit_of_work import UnitOfWork
 from app.schemas.analyses import (
     AnalysisCreate, AnalysisItemCreate, AnalysisItemOut, AnalysisItemUpdate, AnalysisList, AnalysisOut, AnalysisUpdate,
 )
 from app.schemas.common import ERROR_RESPONSES
+from app.schemas.workflow import AnalysisRequest, JobOut
 from app.services.analysis import AnalysisService
+from app.services.source_analysis import start_source_analysis
+from app.workers import tasks
 
 router = APIRouter(tags=["Análises"], responses=ERROR_RESPONSES)
 
@@ -19,9 +23,25 @@ def _service(uow: UnitOfWork = Depends(get_uow)) -> AnalysisService:
     return AnalysisService(uow)
 
 
+@router.post("/projetos/{projeto_id}/analises/gerar", response_model=JobOut, status_code=status.HTTP_202_ACCEPTED,
+             summary="Analisar as fontes (etapa anterior à geração de histórias)",
+             description="Cria um job assíncrono que lê as fontes informadas e a análise mais recente do projeto e "
+                         "grava uma NOVA análise atualizada (não revisada), mantendo os itens, códigos RN/FN e edições "
+                         "da anterior. Use também quando entrarem novas fontes. A geração de histórias só usa "
+                         "análises aprovadas (`revisada: true`).")
+def generate_analysis(
+    projeto_id: int, body: AnalysisRequest, background: BackgroundTasks,
+    uow: UnitOfWork = Depends(get_uow), container: Container = Depends(get_container), actor: str = Depends(get_actor),
+):
+    job = start_source_analysis(uow, projeto_id, body.audio_ids, body.documento_ids, actor)
+    uow.commit()
+    background.add_task(tasks.run_source_analysis, container, job["id"])
+    return job
+
+
 @router.get("/projetos/{projeto_id}/analises", response_model=AnalysisList, summary="Listar análises do projeto",
-            description="Uma análise por geração de histórias (mais recente primeiro), com sistema, participantes, "
-                        "usuários, requisitos de negócio, funcionalidades e itens fora de escopo.")
+            description="Análises do projeto (mais recente primeiro), com sistema, participantes, usuários, "
+                        "requisitos de negócio, funcionalidades e itens fora de escopo.")
 def list_analyses(projeto_id: int, service: AnalysisService = Depends(_service)):
     return service.list(projeto_id)
 
@@ -39,8 +59,8 @@ def get_analysis(analise_id: int, service: AnalysisService = Depends(_service)):
 
 
 @router.patch("/analises/{analise_id}", response_model=AnalysisOut, summary="Editar análise ou marcá-la como revisada",
-              description="Com `revisada: true`, a análise passa a orientar as próximas gerações do projeto "
-                          "(vale a revisada mais recente).")
+              description="Com `revisada: true` a análise fica aprovada e libera a geração de histórias "
+                          "(vale a aprovada mais recente, ou a informada em `analise_id`).")
 def update_analysis(analise_id: int, body: AnalysisUpdate, service: AnalysisService = Depends(_service),
                     actor: str = Depends(get_actor)):
     return service.update(analise_id, body.model_dump(exclude_unset=True), actor)

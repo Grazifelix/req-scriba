@@ -20,7 +20,7 @@ from app.services.evidence import add_evidences, evidence_spec
 from app.services.candidates import EXISTING_DUPLICATE_THRESHOLD, deduplicate, extract_candidates, story_key
 from app.services.consolidation import consolidate
 from app.services.context import MeetingContext, build_context
-from app.services.analysis import reviewed_analysis_text
+from app.services.analysis import analysis_text
 from app.services.generation import batch_budget, fits_in_one_call
 from app.services.indexing import source_key
 from app.services.jobs import JobService, validate_sources
@@ -109,7 +109,7 @@ def run_update_analysis(container: Container, job_id: str) -> None:
                                                         container.settings.rag_top_k, keys)]
                 for s in stories
             }
-            reviewed = reviewed_analysis_text(uow, project_id)
+            reviewed = analysis_text(uow, uow.analyses.latest_reviewed(project_id))
         # contexto só quando as fontes novas não cabem numa chamada; falhas não derrubam o job
         context = None if fits_in_one_call(container, new_chunks, reviewed) else build_context(container, new_chunks)
         drafts, used, failures, attempts, consolidation = [], set(), [], 0, None

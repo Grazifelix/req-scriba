@@ -1,10 +1,12 @@
 """Geração automática de Histórias de Usuário a partir das fontes selecionadas (US-05, US-16).
 
-Modo chamada única (as fontes cabem em GENERATION_BATCH_CHARS): o LLM lê todas as fontes de uma vez, entende
-a reunião (análise) e escreve as histórias; não há passada de contexto nem consolidação.
+Pré-requisito: uma análise das fontes aprovada pelo analista (app.services.source_analysis). Ela entra no
+prompt como ANALISE DO PROJETO, logo após as fontes e o contexto, e as histórias citam os códigos FN dela.
+Modo chamada única (as fontes cabem em GENERATION_BATCH_CHARS): o LLM lê todas as fontes de uma vez e escreve
+as histórias; não há passada de contexto nem consolidação.
 Modo lotes (fontes maiores): contexto prévio → lotes (transcrição + RAG de documentos) → extração por lote →
-deduplicação → consolidação. Nos dois modos: descarte do que já existe → HU + evidências + v1 → análise gravada.
-A análise revisada mais recente do projeto entra no prompt como contexto confirmado pelo analista.
+deduplicação → consolidação. Nos dois modos: descarte do que já existe → HU + evidências + v1 → histórias
+ligadas às funcionalidades da análise.
 """
 
 from __future__ import annotations
@@ -18,7 +20,7 @@ from app.db.unit_of_work import UnitOfWork
 from app.domain.enums import ChangeOrigin, ChangeType, JobStatus, JobType, SourceType
 from app.domain.text import similarity
 from app.services import presenters
-from app.services.analysis import AnalysisBuilder, reviewed_analysis_text, save_generated_analysis
+from app.services.analysis import analysis_text, approved_analysis, functionality_codes, link_stories
 from app.services.candidates import (
     DUPLICATE_THRESHOLD, EXISTING_DUPLICATE_THRESHOLD, deduplicate, extract_batch, extract_candidates, story_key,
 )
@@ -37,27 +39,32 @@ __all__ = [
 ]
 
 
-def start_generation(uow: UnitOfWork, project_id: int, audio_ids: list[int], document_ids: list[int], author: str) -> dict:
+def start_generation(
+    uow: UnitOfWork, project_id: int, audio_ids: list[int], document_ids: list[int], author: str,
+    analysis_id: int | None = None,
+) -> dict:
+    """Cria o job. Exige análise aprovada (a informada ou a aprovada mais recente), fixada nos parâmetros do job."""
     validate_sources(uow, project_id, audio_ids, document_ids)
+    analysis = approved_analysis(uow, project_id, analysis_id)
     job = JobService(uow).create(
         project_id, JobType.STORY_GENERATION,
-        {"audio_ids": audio_ids, "documento_ids": document_ids, "responsavel": author},
+        {"audio_ids": audio_ids, "documento_ids": document_ids, "analise_id": analysis["id"], "responsavel": author},
     )
     return presenters.job(job)
 
 
-def batch_budget(container: Container, context: MeetingContext | None, reviewed_text: str | None = None) -> int:
-    """Orçamento de caracteres por lote, descontando contexto e análise revisada (piso: metade do orçamento)."""
+def batch_budget(container: Container, context: MeetingContext | None, analysis: str | None = None) -> int:
+    """Orçamento de caracteres por lote, descontando contexto e texto da análise (piso: metade do orçamento)."""
     budget = container.settings.generation_batch_chars
-    extra = len(reviewed_text or "") + (len(context.text()) if context and context.items else 0)
+    extra = len(analysis or "") + (len(context.text()) if context and context.items else 0)
     if not extra:
         return budget
     return max(budget - extra, budget // 2)
 
 
-def fits_in_one_call(container: Container, chunks: list[dict], reviewed_text: str | None = None) -> bool:
-    """True quando todas as fontes (e a análise revisada) cabem em uma única chamada ao LLM."""
-    total = sum(len(c["texto"]) for c in chunks) + len(reviewed_text or "")
+def fits_in_one_call(container: Container, chunks: list[dict], analysis: str | None = None) -> bool:
+    """True quando todas as fontes (e o texto da análise) cabem em uma única chamada ao LLM."""
+    total = sum(len(c["texto"]) for c in chunks) + len(analysis or "")
     return total <= container.settings.generation_batch_chars
 
 
@@ -109,42 +116,43 @@ def drop_existing(candidates: list[dict], existing: list[dict]) -> tuple[list[di
 
 def _extract_all(
     container: Container, job_id: str, batches: list[list[dict]], context: MeetingContext | None,
-    reviewed_text: str | None, builder: AnalysisBuilder,
+    analysis: str | None, fn_codes: set[str],
 ) -> tuple[list[dict], list[dict]]:
-    """Extrai cada lote; a análise de cada lote entra no builder e as candidatas recebem os códigos FN globais."""
+    """Extrai cada lote; as candidatas guardam o código FN da análise que citaram (só códigos existentes)."""
     candidates, failures = [], []
     complete = len(batches) == 1
     for index, batch in enumerate(batches, start=1):
         try:
-            extraction = extract_batch(container, batch, context, reviewed_text, complete)
+            extracted = extract_batch(container, batch, context, analysis, complete)
         except AppError as exc:
             logger.warning("Lote %d do job %s falhou: %s", index, job_id, exc.message)
             failures.append({"lote": index, "erro": exc.message})
             continue
-        code_map = builder.add(extraction.analysis, extraction.sources)
-        for candidate in extraction.candidates:
+        for candidate in extracted:
             ref = candidate.pop("funcionalidade_ref", None)
-            candidate["funcionalidades"] = [code_map[ref]] if ref in code_map else []
-        candidates.extend(extraction.candidates)
+            candidate["funcionalidades"] = [ref] if ref in fn_codes else []
+        candidates.extend(extracted)
     if batches and len(failures) == len(batches):
         raise AppError("Todos os lotes falharam na extração.", {"lotes_com_erro": failures})
     return candidates, failures
 
 
-def _prepare(container: Container, project_id: int, audio_ids: list[int], document_ids: list[int]) -> tuple:
-    """Lê fontes, histórias existentes e análise revisada; decide o modo; monta os lotes."""
+def _prepare(container: Container, project_id: int, params: dict) -> tuple:
+    """Lê fontes, histórias existentes e a análise aprovada do job; decide o modo; monta os lotes."""
+    audio_ids, document_ids = params["audio_ids"], params["documento_ids"]
     with container.uow() as uow:
         validate_sources(uow, project_id, audio_ids, document_ids)
+        analysis = approved_analysis(uow, project_id, params.get("analise_id"))
         chunks = source_chunks(uow, audio_ids, document_ids)
         existing = uow.stories.list_active(project_id)
-        reviewed = reviewed_analysis_text(uow, project_id)
-    if fits_in_one_call(container, chunks, reviewed):
-        return [chunks], None, existing, reviewed
+        text, fn_codes = analysis_text(uow, analysis), functionality_codes(uow, analysis["id"])
+    if fits_in_one_call(container, chunks, text):
+        return [chunks], None, existing, (analysis, text, fn_codes)
     context = build_context(container, chunks)
     with container.uow() as uow:
-        budget = batch_budget(container, context, reviewed)
+        budget = batch_budget(container, context, text)
         batches = build_batches(uow, container, project_id, audio_ids, document_ids, budget)
-    return batches, context, existing, reviewed
+    return batches, context, existing, (analysis, text, fn_codes)
 
 
 def run_generation(container: Container, job_id: str) -> None:
@@ -155,31 +163,28 @@ def run_generation(container: Container, job_id: str) -> None:
             return
         JobService(uow).mark(job_id, JobStatus.PROCESSING)
     params, project_id = job["parametros"], job["projeto_id"]
-    audio_ids, document_ids = params["audio_ids"], params["documento_ids"]
     try:
-        batches, context, existing, reviewed = _prepare(container, project_id, audio_ids, document_ids)
+        batches, context, existing, (analysis, text, fn_codes) = _prepare(container, project_id, params)
         single = len(batches) == 1
-        builder = AnalysisBuilder()
-        candidates, failures = _extract_all(container, job_id, batches, context, reviewed, builder)
+        candidates, failures = _extract_all(container, job_id, batches, context, text, fn_codes)
         candidates, consolidation = deduplicate(candidates), None
         if not single:  # na chamada única o modelo já viu o conjunto inteiro
             candidates, consolidation = consolidate(container, candidates)
         candidates, skipped = drop_existing(candidates, existing)
         with container.uow() as uow:
-            created = []
+            created, links = [], []
             for c in candidates:
                 story_id = create_story_record(
                     uow, project_id, c, origin="ia", change_type=ChangeType.AUTOMATIC,
                     change_origin=ChangeOrigin.AI_GENERATION, author="sistema", evidence_specs=c["evidencias"],
                 )
-                builder.link_story(c.get("funcionalidades") or [], story_id)
+                links.append((c.get("funcionalidades") or [], story_id))
                 created.append(story_id)
-            analysis_id = save_generated_analysis(uow, project_id, job_id, builder, audio_ids, document_ids)
+            link_stories(uow, analysis["id"], links)
             result: dict[str, Any] = {
                 "historias_criadas": created, "total": len(created), "lotes": len(batches),
                 "modo": "chamada_unica" if single else "lotes", "lotes_com_erro": failures,
-                "ignoradas_por_duplicidade": skipped, "analise_id": analysis_id,
-                "analise_revisada_usada": reviewed is not None,
+                "ignoradas_por_duplicidade": skipped, "analise_id": analysis["id"],
                 "contexto": context.summary() if context else None, "consolidacao": consolidation,
                 "mensagem": None if created else "Nenhuma nova necessidade funcional foi identificada nas fontes.",
             }

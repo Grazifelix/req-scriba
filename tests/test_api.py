@@ -114,6 +114,17 @@ def test_full_flow(client):
     assert client.get(f"{API}/documentos/{document_id}/conteudo").json()["total_trechos"] >= 1
     assert client.get(f"{API}/projetos/{project_id}/busca", params={"termo": "boletim"}).json()["total"] >= 1
 
+    # Análise das fontes (job) → revisão e aprovação → geração de histórias
+    sources = {"audio_ids": [audio_id], "documento_ids": [document_id]}
+    blocked = client.post(f"{API}/projetos/{project_id}/historias/gerar", json=sources, headers=headers)
+    assert_error(blocked, 422, "validacao")  # sem análise aprovada
+    analysis_job = client.post(f"{API}/projetos/{project_id}/analises/gerar", json=sources, headers=headers)
+    assert analysis_job.status_code == 202 and analysis_job.json()["tipo"] == "analise_fontes"
+    analysis_job = client.get(f"{API}/jobs/{analysis_job.json()['id']}").json()
+    assert analysis_job["status"] == "concluido", analysis_job
+    analysis_id = analysis_job["resultado"]["analise_id"]
+    assert client.patch(f"{API}/analises/{analysis_id}", json={"revisada": True}, headers=headers).json()["revisada"]
+
     # US-05: geração (job)
     job = client.post(f"{API}/projetos/{project_id}/historias/gerar",
                       json={"audio_ids": [audio_id], "documento_ids": [document_id]}, headers=headers)
@@ -274,7 +285,7 @@ def test_openapi_documents_all_routes(client):
         "/sugestoes-atualizacao/{sugestao_id}", "/sugestoes-atualizacao/{sugestao_id}/aprovar",
         "/sugestoes-atualizacao/{sugestao_id}/rejeitar", "/jobs/{job_id}", "/projetos/{projeto_id}/jobs",
         "/projetos/{projeto_id}/analises", "/analises/{analise_id}", "/analises/{analise_id}/itens",
-        "/analises/{analise_id}/itens/{item_id}",
+        "/analises/{analise_id}/itens/{item_id}", "/projetos/{projeto_id}/analises/gerar",
     }
     assert {API + p for p in expected} <= paths
     for path, operations in spec["paths"].items():

@@ -10,6 +10,8 @@ from app.services.audios import transcribe_audio
 from app.services.documents import process_document
 from app.services.generation import run_generation
 from app.services.quality import run_batch_evaluation
+from app.services.source_analysis import run_source_analysis
 from app.services.updates import run_update_analysis
 
-__all__ = ["transcribe_audio", "process_document", "run_generation", "run_update_analysis", "run_batch_evaluation"]
+__all__ = ["transcribe_audio", "process_document", "run_generation", "run_update_analysis", "run_batch_evaluation",
+           "run_source_analysis"]

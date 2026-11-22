@@ -30,13 +30,15 @@ def _service(uow: UnitOfWork = Depends(get_uow)) -> StoryService:
 
 @router.post("/projetos/{projeto_id}/historias/gerar", response_model=JobOut, status_code=status.HTTP_202_ACCEPTED,
              summary="Gerar histórias a partir das fontes (US-05)",
-             description="Cria um job assíncrono. As histórias geradas ficam com status 'em_revisao' ou "
-                         "'falta_informacao' e evidências vinculadas aos trechos de origem (US-16).")
+             description="Cria um job assíncrono. Exige uma análise das fontes aprovada pelo analista "
+                         "(`analise_id` ou a aprovada mais recente), que entra no prompt como ANALISE DO PROJETO. "
+                         "As histórias geradas ficam com status 'em_revisao' ou 'falta_informacao' e evidências "
+                         "vinculadas aos trechos de origem (US-16).")
 def generate_stories(
     projeto_id: int, body: GenerationRequest, background: BackgroundTasks,
     uow: UnitOfWork = Depends(get_uow), container: Container = Depends(get_container), actor: str = Depends(get_actor),
 ):
-    job = start_generation(uow, projeto_id, body.audio_ids, body.documento_ids, actor)
+    job = start_generation(uow, projeto_id, body.audio_ids, body.documento_ids, actor, body.analise_id)
     uow.commit()
     background.add_task(tasks.run_generation, container, job["id"])
     return job

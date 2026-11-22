@@ -14,6 +14,12 @@ class AnalysisRepository(BaseRepository):
     def list_by_project(self, project_id: int) -> list[dict[str, Any]]:
         return self._select("projeto_id = ?", (project_id,), order="id DESC")
 
+    def latest(self, project_id: int) -> dict[str, Any] | None:
+        row = self.conn.execute(
+            "SELECT * FROM analises WHERE projeto_id = ? ORDER BY id DESC LIMIT 1", (project_id,)
+        ).fetchone()
+        return self._decode(row)
+
     def latest_reviewed(self, project_id: int) -> dict[str, Any] | None:
         row = self.conn.execute(
             "SELECT * FROM analises WHERE projeto_id = ? AND revisada = 1 ORDER BY id DESC LIMIT 1", (project_id,)

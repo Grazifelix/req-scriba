@@ -138,14 +138,15 @@ fontes (JSON `["audio:4"]`), status (`pendente|aprovada|rejeitada`), editada (0/
 versao_aplicada, historia_criada_id, job_id, criado_em, atualizado_em.
 
 ### 3.12 `jobs`
-id (uuid hex), projeto_id, tipo (`geracao_historias|analise_atualizacao|avaliacao_qualidade`), status
+id (uuid hex), projeto_id, tipo (`geracao_historias|analise_fontes|analise_atualizacao|avaliacao_qualidade`), status
 (`pendente|processando|concluido|erro`), parametros (JSON), resultado (JSON), mensagem_erro,
 criado_em, atualizado_em, concluido_em.
 
 ### 3.13 `analises`
-id, projeto_id, job_id (geração que a produziu; NULL se manual), origem (`ia|manual`), sistema,
-fontes (JSON `[{"tipo_fonte","fonte_id","nome_arquivo"}]`), revisada (0/1), revisada_por, revisada_em,
-criado_em, atualizado_em. Uma por geração; a revisada mais recente do projeto orienta as próximas extrações.
+id, projeto_id, job_id (job `analise_fontes` que a produziu; NULL se manual), origem (`ia|manual`), sistema,
+fontes (JSON `[{"tipo_fonte","fonte_id","nome_arquivo"}]`, acumuladas desde a primeira análise), revisada (0/1),
+revisada_por, revisada_em, criado_em, atualizado_em. Uma por execução do job de análise; `revisada = 1` significa
+aprovada pelo analista, condição para gerar HU.
 
 ### 3.14 `itens_analise`
 id, analise_id, tipo (`participante|usuario|requisito_negocio|funcionalidade|fora_de_escopo`), codigo
@@ -228,8 +229,9 @@ União de: critérios QUS ≠ Atende da última avaliação (`qus:<criterio>`), 
   "criado_em": "...", "atualizado_em": "..."
 }
 ```
-O resultado do job de geração traz `modo` (`chamada_unica|lotes`), `analise_id` (NULL se o modelo não
-devolveu análise) e `analise_revisada_usada`.
+O resultado do job `analise_fontes` traz `analise_id` (NULL se o modelo não devolveu análise),
+`analise_anterior_id`, `modo` (`chamada_unica|lotes`), `lotes`, `lotes_com_erro` e `contexto`. O resultado do
+job de geração traz `modo` e `analise_id` (a análise aprovada usada, também gravada em `parametros`).
 
 ### 4.5 Sugestão de atualização (`GET /sugestoes-atualizacao/{id}`)
 Além de `evidencias` (cópias cruas dos trechos), a resposta traz `fontes_audio` e `fontes_documentos`,
@@ -276,15 +278,20 @@ frontend usa esses campos para mostrar em quais fontes a IA se baseou.
   rótulos; o backend resolve rótulos → `trechos_fonte` e copia o texto para `evidencias`. Rótulos
   inexistentes são descartados, assim como códigos que não são fontes (`FN1`, `RN2`, `H1`). HU sem rótulo
   válido recebe afirmação "sem trecho de origem".
-- **Prompt de extração (versão 2.0, `### TAREFA: EXTRACAO_HISTORIAS`):** fontes primeiro (entre `<fontes>`),
-  instruções e formato no final. O JSON pede, nesta ordem, `analise` (sistema, participantes, usuários,
-  requisitos de negócio `RN#`, funcionalidades `FN#`, fora de escopo), `historias` (com `id` `H#`,
-  `funcionalidade_ref`, `citacao` literal) e `lacunas_conjunto`. Traz os 13 critérios QUS com exemplos
-  incorreto → correto e a lista do que não é história. Na leitura da resposta: funcionalidade e benefício
+- **Prompt de análise das fontes (versão 3.0, `### TAREFA: ANALISE_FONTES`):** fontes (entre `<fontes>`) →
+  `CONTEXTO GERAL` (modo lotes) → `ANÁLISE ATUAL DO PROJETO` (a análise mais recente, quando existe) →
+  instruções ("ETAPA 1: Entender as fontes") e formato. O JSON pede só `analise` (sistema, participantes,
+  usuários, requisitos de negócio `RN#`, funcionalidades `FN#`, fora de escopo). Com análise atual, o modelo
+  devolve a análise completa e atualizada, mantendo os códigos.
+- **Prompt de histórias (versão 3.0, `### TAREFA: EXTRACAO_HISTORIAS`):** fontes → `CONTEXTO GERAL` →
+  `ANALISE DO PROJETO` (a análise aprovada) → instruções ("ETAPA 1: Escrever as histórias") e formato. O JSON
+  pede `historias` (com `id` `H#`, `funcionalidade_ref` = código FN da análise, `citacao` literal) e
+  `lacunas_conjunto`. Traz os 13 critérios QUS com exemplos incorreto → correto e a lista do que não é
+  história. Na leitura da resposta: funcionalidade e benefício
   com minúscula inicial (siglas preservadas); `citacao` conferida contra o texto dos trechos citados (se não
   bater → `afirmacoes_sem_evidencia`); `lacunas_conjunto` (`conflito`, `fluxo_incompleto`) → `informacoes_ausentes`
-  das HU citadas. Respostas no formato antigo (só `historias`) continuam válidas.
-- **Geração — modo chamada única:** quando o texto de todas as fontes (mais a análise revisada) cabe em
+  das HU citadas. `funcionalidade_ref` que não existe na análise é ignorado.
+- **Geração — modo chamada única:** quando o texto de todas as fontes (mais a análise aprovada) cabe em
   `REQSCRIBA_GENERATION_BATCH_CHARS`, uma única chamada recebe tudo, e as passadas de contexto e de
   consolidação não rodam. Para modelos com contexto grande (ex.: Llama 4 Scout), aumente essa variável
   (ex.: `300000`).
@@ -292,12 +299,16 @@ frontend usa esses campos para mostrar em quais fontes a IA se baseou.
   enriquecido com até 4 trechos de documentos recuperados por RAG (filtro pelas fontes selecionadas);
   trechos de documentos não usados são processados em lotes próprios. Deduplicação final por
   similaridade (≥ 0,85) mescla evidências, critérios e funcionalidades de origem (nos dois modos).
-- **Análise das fontes** (`services/analysis.py`): a análise de cada lote entra num `AnalysisBuilder`, que
-  mescla itens parecidos do mesmo tipo (≥ 0,85), une evidências e renumera `RN`/`FN` globalmente (com as
-  referências FN → RN remapeadas). Depois da criação das HU, cada funcionalidade guarda os ids das HU que
-  a citaram, e a análise é gravada (se não estiver vazia). A análise **revisada** mais recente do projeto
-  entra nos prompts de extração (geração e novas fontes) como seção "ANÁLISE REVISADA PELO ANALISTA",
-  descontada do orçamento dos lotes; ela não é fonte e não pode ser citada.
+- **Análise das fontes** (`services/source_analysis.py`, job `analise_fontes`): roda antes e independente da
+  geração (também quando entram novas fontes). Um `AnalysisBuilder` (`services/analysis.py`) é semeado com a
+  análise mais recente do projeto (itens, códigos, evidências, edições e ligações com HU); a análise de cada
+  lote é mesclada nele: itens do mesmo tipo com o mesmo código da análise anterior ou parecidos (≥ 0,85) viram
+  um só (o texto existente é mantido), evidências são unidas e itens novos recebem o próximo `RN`/`FN`. O
+  resultado é gravado como NOVA análise (`revisada = 0`); a anterior não muda.
+- **Aprovação como pré-requisito:** `POST /historias/gerar` exige uma análise com `revisada = 1` (`analise_id`
+  informado ou a aprovada mais recente), senão `422`. Ela entra no prompt de histórias como "ANALISE DO
+  PROJETO", descontada do orçamento dos lotes; não é fonte e não pode ser citada. Depois da criação das HU,
+  cada funcionalidade dessa análise guarda os ids das HU que a citaram em `funcionalidade_ref`.
 - **Passada de contexto prévia** (`services/context.py`, `REQSCRIBA_GENERATION_CONTEXT_PASS`, só no modo lotes): antes da
   extração, o LLM lê todas as fontes selecionadas em lotes (`### TAREFA: CONTEXTO_REUNIAO`) e lista perfis,
   objetivos e termos, cada item citando rótulos `F`. Itens sem rótulo válido são descartados; itens
@@ -316,7 +327,8 @@ frontend usa esses campos para mostrar em quais fontes a IA se baseou.
   citados por nenhuma HU passam pela extração → sugestões `novo_requisito` (descartando duplicatas ≥ 0,90).
   O contexto prévio é construído sobre todas as novas fontes quando elas não cabem numa chamada, e a
   consolidação roda sobre as candidatas (com mais de um lote) antes do descarte de duplicatas. A análise
-  devolvida nessa extração não é gravada (a análise é uma por geração).
+  aprovada mais recente entra no prompt como "ANALISE DO PROJETO"; para atualizar a análise com as novas
+  fontes, use o job `analise_fontes`.
 
 ## 8. Estratégia de validação
 

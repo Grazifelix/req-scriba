@@ -24,7 +24,7 @@ from app.services.quality import QualityService
 from app.services.questions import QuestionService
 from app.services.stories import StoryService
 from app.services.updates import UpdateService, run_update_analysis, start_analysis
-from tests.conftest import upload_document
+from tests.conftest import ensure_approved_analysis, upload_document
 
 
 def test_all_service_outputs_match_response_models(container, project_id, audio_id, document_id):
@@ -42,6 +42,8 @@ def test_all_service_outputs_match_response_models(container, project_id, audio_
         DocumentList.model_validate(documents.list(project_id))
         DocumentContentOut.model_validate(documents.content(document_id))
         SearchOut.model_validate(retrieval.search(uow, container, project_id, "boletim", 5))
+    ensure_approved_analysis(container, project_id)
+    with container.uow() as uow:
         job = start_generation(uow, project_id, [audio_id], [document_id], "ana")
         JobOut.model_validate(job)
     run_generation(container, job["id"])

@@ -13,6 +13,7 @@ from app.db.database import Database
 from app.integrations.embeddings import HashEmbedder
 from app.integrations.storage import FileStorage
 from app.integrations.vector_store import InMemoryVectorStore
+from app.services.analysis import AnalysisService
 from app.services.audios import AudioService, transcribe_audio
 from app.services.documents import DocumentService, process_document
 from app.services.projects import ProjectService
@@ -57,6 +58,18 @@ def upload_document(container: Container, project_id: int, text: str = DOC_TEXT,
         )["id"]
     process_document(container, document_id)
     return document_id
+
+
+def ensure_approved_analysis(container: Container, project_id: int) -> int:
+    """Pré-requisito da geração de histórias: uma análise das fontes aprovada (cria uma manual se não houver)."""
+    with container.uow() as uow:
+        existing = uow.analyses.latest_reviewed(project_id)
+        if existing:
+            return existing["id"]
+        return AnalysisService(uow).create(project_id, {"sistema": "Sistema escolar", "revisada": True, "itens": [
+            {"tipo": "usuario", "texto": "coordenador pedagógico"},
+            {"tipo": "funcionalidade", "texto": "emitir o boletim da turma", "complemento": "coordenador pedagógico"},
+        ]}, "ana")["id"]
 
 
 @pytest.fixture

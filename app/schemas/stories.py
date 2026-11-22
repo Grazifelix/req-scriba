@@ -42,6 +42,9 @@ class StoryUpdate(InputModel):
 class GenerationRequest(InputModel):
     audio_ids: list[int] = Field(default_factory=list, max_length=100)
     documento_ids: list[int] = Field(default_factory=list, max_length=100)
+    analise_id: Optional[int] = Field(
+        default=None, description="Análise aprovada a usar; sem valor, usa a aprovada mais recente do projeto."
+    )
 
 
 class QualitySummary(OutputModel):

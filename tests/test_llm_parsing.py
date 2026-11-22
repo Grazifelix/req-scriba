@@ -132,6 +132,15 @@ def test_extraction_result_accepts_old_format():
     assert result["historias"][0]["ref"] is None and result["historias"][0]["citacao"] is None
 
 
+def test_analysis_result_accepts_wrapped_or_root_object():
+    analysis = {"sistema": "Portal", "usuarios": [{"papel": "secretaria", "fontes": ["F1", "F9"]}]}
+    for data in ({"analise": analysis}, analysis):
+        result = parsing.normalize_analysis_result(data, {"F1"})
+        assert result["sistema"] == "Portal"
+        assert [(i["tipo"], i["texto"], i["fontes"]) for i in result["itens"]] == [("usuario", "secretaria", ["F1"])]
+    assert parsing.normalize_analysis_result({"historias": []}, set()) == {"sistema": None, "itens": []}
+
+
 def test_normalize_context_requires_valid_sources():
     data = {"perfis": [{"texto": "Coordenador acompanha notas", "fontes": ["F1"]}, {"texto": "Sem fonte"}],
             "glossario": [{"termo": "Boletim", "definicao": "relatório bimestral", "sources": "F2"}],

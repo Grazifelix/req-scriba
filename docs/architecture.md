@@ -370,15 +370,20 @@ classDiagram
 **Correção de transcrição:** `PATCH segmento` → texto revisado salvo (original preservado) → janelas do
 áudio reconstruídas e reindexadas (o mesmo texto revisado alimenta as próximas extrações).
 
-**Geração de HU:** job → valida fontes → lê a análise revisada mais recente do projeto (se houver) →
-**chamada única** quando as fontes cabem em `GENERATION_BATCH_CHARS` (o LLM lê tudo, monta a análise e
-escreve as HU) ou **lotes** (passada de contexto → itens `R#` → lotes com transcrição + RAG de documentos →
-LLM por lote → consolidação) → normalização (citação conferida, lacunas de conjunto viram
-`informacoes_ausentes`) → deduplicação → descarte do que já existe → HU + evidências + versão 1 → análise
-gravada (itens com evidências reais e ligação FN → HU) → job `concluido`.
+**Análise das fontes:** fontes enviadas → `POST /projetos/{id}/analises/gerar` → job `analise_fontes` → lê a
+análise mais recente do projeto (se houver) → chamada única ou lotes (com passada de contexto) → LLM devolve
+a análise atualizada → mesclagem com a anterior (códigos e edições preservados) → NOVA análise gravada,
+não revisada (itens com evidências reais) → job `concluido`. Repete-se sempre que entram novas fontes.
 
-**Revisão da análise:** o analista edita os itens (`/analises/{id}/itens`) e marca a análise como
-`revisada` → a revisada mais recente entra nos próximos prompts de extração como contexto confirmado.
+**Revisão e aprovação da análise:** o analista edita os itens (`/analises/{id}/itens`) e aprova a análise
+(`PATCH /analises/{id}` com `revisada: true`). Sem análise aprovada, a geração de HU responde `422`.
+
+**Geração de HU:** job (exige análise aprovada: `analise_id` ou a aprovada mais recente) → valida fontes →
+**chamada única** quando as fontes cabem em `GENERATION_BATCH_CHARS` ou **lotes** (passada de contexto →
+itens `R#` → lotes com transcrição + RAG de documentos → LLM por lote → consolidação); o prompt traz fontes →
+contexto → ANALISE DO PROJETO → instruções → normalização (citação conferida, lacunas de conjunto viram
+`informacoes_ausentes`) → deduplicação → descarte do que já existe → HU + evidências + versão 1 → FN da
+análise ligadas às HU (`historia_ids`) → job `concluido`.
 
 **Avaliação QUS:** HU + backlog → LLM (8 individuais) + LLM (conjunto) + regras determinísticas → avaliação
 persistida (histórico) → cache de qualidade na HU.
@@ -416,6 +421,7 @@ aprova/edita/rejeita → aplicação gera nova versão + evidências `atualizaca
 | D22 | Análise revisada como contexto confirmado | A análise mais recente com `revisada = true` entra nos prompts de extração (geração e novas fontes) como informação confirmada por humano: papéis de usuário, requisitos de negócio e itens fora de escopo. Ela não é fonte: toda HU continua precisando de rótulos `F`. É descontada do orçamento de cada lote. |
 | D23 | Rótulos estritos e citação conferida | `normalize_label` aceitava "FN1" como "F1" (pega o número), o que daria evidência errada sem aviso. Agora só aceita número que não venha colado a letra ou dígito. Cada HU traz uma `citacao` literal, conferida (ignorando acentos e pontuação) contra o texto dos trechos citados; se não bater, vira `afirmacoes_sem_evidencia`. Lacunas de conjunto (`conflito`, `fluxo_incompleto`) viram `informacoes_ausentes` e, por isso, defeitos e perguntas de follow-up. |
 | D24 | Avaliação QUS em lote como job (`avaliacao_qualidade`) | Cada avaliação faz 1–2 chamadas ao LLM; avaliar várias HU numa requisição estouraria timeouts. O job reaproveita `QualityService.evaluate` com uma transação por história (cada nota é gravada assim que sai), registra falhas por história sem interromper o lote e só fica `erro` se nenhuma for avaliada. O frontend oferece o lote ao fim de uma geração, para as HU recém-criadas. |
+| D26 | Análise das fontes em job próprio, aprovada antes da geração (substitui a análise por geração de D20–D22) | A etapa "entender as fontes" saiu do prompt de histórias e virou o prompt `ANALISE_FONTES`, reutilizável: roda na primeira ingestão e a cada nova fonte, recebendo a análise mais recente para atualizá-la, sem gerar HU. Cada execução grava uma nova análise (histórico preservado, nada é sobrescrito) que mantém os códigos RN/FN e as edições do analista. Só uma análise aprovada (`revisada = 1`) libera a geração, que a recebe como "ANALISE DO PROJETO" logo após as fontes e o contexto; assim o humano valida perfis, requisitos de negócio e escopo antes de qualquer HU (Human-in-the-Loop). Custo: uma chamada ao LLM a mais por ciclo e uma etapa manual. A análise nova é criada não revisada porque o modelo pode ter acrescentado itens que ninguém conferiu. |
 | D25 | Excluir áudio interrompe a transcrição (cancelamento cooperativo) | `Transcriber.transcribe` recebe `should_cancel`, consultado após a decodificação e entre segmentos (o `faster-whisper` gera segmentos sob demanda). O sinal é a própria ausência da linha em `audios`, o que cobre também a exclusão do projeto (cascade) sem estado em memória. O `DELETE` responde na hora; a tarefa para no próximo ponto de checagem (fim do segmento atual ou da VAD inicial) e descarta o resultado, sem marcar `erro`. Antes de gravar os segmentos a existência é conferida de novo (evita violar a FK). Se o arquivo estiver aberto no Windows, `FileStorage.remove` só registra aviso. |
 
 **Dependências e justificativas:** `fastapi`/`uvicorn` (API), `python-multipart` (upload),
@@ -485,10 +491,11 @@ Cabeçalho opcional `X-Usuario` (responsável pelas alterações; padrão `engen
 ### Análises das fontes
 | Método | Rota | Descrição |
 |---|---|---|
-| GET | `/projetos/{projeto_id}/analises` | Listar análises (uma por geração, mais recente primeiro) |
+| POST | `/projetos/{projeto_id}/analises/gerar` | Analisar `audio_ids`/`documento_ids` (atualiza a análise mais recente) → `202` job `analise_fontes` |
+| GET | `/projetos/{projeto_id}/analises` | Listar análises (mais recente primeiro) |
 | POST | `/projetos/{projeto_id}/analises` | Criar análise manualmente (com itens opcionais) |
 | GET | `/analises/{analise_id}` | Detalhe: sistema, fontes, totais e itens com evidências |
-| PATCH | `/analises/{analise_id}` | Editar `sistema` ou marcar `revisada` (passa a orientar as próximas gerações) |
+| PATCH | `/analises/{analise_id}` | Editar `sistema` ou aprovar (`revisada: true`, libera a geração de HU) |
 | DELETE | `/analises/{analise_id}` | Excluir análise e itens (HU não são afetadas) |
 | POST | `/analises/{analise_id}/itens` | Adicionar item (RN/FN recebem código automático) |
 | PATCH | `/analises/{analise_id}/itens/{item_id}` | Editar texto, complemento, referências ou trechos |
@@ -497,7 +504,7 @@ Cabeçalho opcional `X-Usuario` (responsável pelas alterações; padrão `engen
 ### Histórias de Usuário (US-05, 06, 16–20)
 | Método | Rota | Descrição |
 |---|---|---|
-| POST | `/projetos/{projeto_id}/historias/gerar` | Gerar HU a partir de `audio_ids`/`documento_ids` → `202` job |
+| POST | `/projetos/{projeto_id}/historias/gerar` | Gerar HU a partir de `audio_ids`/`documento_ids` e de uma análise aprovada (`analise_id` opcional) → `202` job; sem análise aprovada → `422` |
 | POST | `/projetos/{projeto_id}/historias` | Criar HU manualmente |
 | GET | `/projetos/{projeto_id}/historias?status=` | Listar HU |
 | GET | `/historias/{historia_id}` | Detalhe completo (QUS, fontes, versões) |

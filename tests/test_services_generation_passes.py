@@ -11,7 +11,7 @@ from app.services.consolidation import apply_operations
 from app.services.generation import run_generation, start_generation
 from app.services.stories import StoryService
 from app.services.updates import UpdateService, run_update_analysis, start_analysis
-from tests.conftest import upload_document
+from tests.conftest import ensure_approved_analysis, upload_document
 from tests.fakes import default_extraction
 
 
@@ -22,6 +22,7 @@ def batch_mode(container):
 
 
 def generate(container, project_id, audio_ids=(), document_ids=()):
+    ensure_approved_analysis(container, project_id)
     with container.uow() as uow:
         job = start_generation(uow, project_id, list(audio_ids), list(document_ids), "ana")
     run_generation(container, job["id"])

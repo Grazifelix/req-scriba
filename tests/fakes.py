@@ -27,6 +27,16 @@ def default_extraction(prompt: str) -> dict[str, Any]:
     ]}
 
 
+def default_analysis(prompt: str) -> dict[str, Any]:
+    return {"analise": {
+        "sistema": "Sistema escolar de boletins",
+        "usuarios": [{"papel": "coordenador pedagógico", "descricao": "acompanha o desempenho", "fontes": ["F1"]}],
+        "requisitos_negocio": [{"id": "RN1", "descricao": "acompanhar o desempenho dos alunos", "fontes": ["F1"]}],
+        "funcionalidades": [{"id": "FN1", "usuario": "coordenador pedagógico", "descricao": "emitir o boletim da turma",
+                             "requisitos_negocio": ["RN1"], "fontes": ["F1"]}],
+    }}
+
+
 def default_individual(prompt: str) -> dict[str, Any]:
     criteria = {k: {"resultado": "Atende", "evidencia": "ok", "acao": "Nenhuma ação necessária"} for k in (
         "well_formed", "atomic", "minimal", "conceptually_sound", "problem_oriented", "unambiguous",
@@ -70,6 +80,7 @@ class FakeLLM:
     def __init__(self) -> None:
         self.handlers: dict[str, Handler] = {
             "CONTEXTO_REUNIAO": default_context,
+            "ANALISE_FONTES": default_analysis,
             "CONSOLIDACAO_HISTORIAS": default_consolidation,
             "EXTRACAO_HISTORIAS": default_extraction,
             "AVALIACAO_QUS_INDIVIDUAL": default_individual,

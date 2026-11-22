@@ -78,6 +78,11 @@ curl -s -X POST $API/projetos -H 'Content-Type: application/json' -d '{"titulo":
 curl -s -X POST $API/projetos/1/audios -F arquivo=@reuniao1.mp3
 curl -s $API/audios/1                                   # acompanhe o status
 curl -s -X POST $API/projetos/1/documentos -F arquivo=@escopo.pdf
+curl -s -X POST $API/projetos/1/analises/gerar -H 'Content-Type: application/json' \
+     -H 'X-Usuario: ana' -d '{"audio_ids":[1],"documento_ids":[1]}'
+curl -s $API/jobs/<job_id>                              # analise_id
+curl -s -X PATCH $API/analises/<analise_id> -H 'Content-Type: application/json' \
+     -H 'X-Usuario: ana' -d '{"revisada":true}'          # revisar os itens e aprovar
 curl -s -X POST $API/projetos/1/historias/gerar -H 'Content-Type: application/json' \
      -H 'X-Usuario: ana' -d '{"audio_ids":[1],"documento_ids":[1]}'
 curl -s $API/jobs/<job_id>                              # historias_criadas

@@ -211,6 +211,12 @@ def normalize_analysis(data: Any, valid_labels: set[str]) -> dict[str, Any]:
     return {"sistema": _text(_pick(data, "sistema", "system", "produto", "solucao"), 500), "itens": items}
 
 
+def normalize_analysis_result(data: dict[str, Any], valid_labels: set[str]) -> dict[str, Any]:
+    """Resposta do prompt de análise: aceita {"analise": {...}} ou a análise direto no nível raiz."""
+    block = _pick(data, "analise", "análise", "analysis")
+    return normalize_analysis(block if isinstance(block, dict) else data, valid_labels)
+
+
 def _set_gaps(value: Any) -> list[dict[str, Any]]:
     gaps = []
     for item in _as_list(value):
