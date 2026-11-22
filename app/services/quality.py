@@ -2,17 +2,22 @@
 
 from __future__ import annotations
 
+import logging
+
 from app.core.container import Container
-from app.core.errors import ConflictError, NotFoundError
+from app.core.errors import AppError, BusinessValidationError, ConflictError, NotFoundError
 from app.core.time import utc_now_iso
 from app.db.unit_of_work import UnitOfWork
 from app.domain import qus, story_format
-from app.domain.enums import StoryStatus, label_of
+from app.domain.enums import JobStatus, JobType, StoryStatus, label_of
 from app.domain.text import similarity
 from app.llm import parsing, prompts
 from app.services import presenters
 from app.services.common import require_project, require_story
+from app.services.jobs import JobService
 from app.services.projects import overall_quality
+
+logger = logging.getLogger(__name__)
 
 UNIQUE_THRESHOLD = 0.90
 MAX_BACKLOG_CONTEXT = 30
@@ -205,3 +210,66 @@ class QualityService:
             "historias_com_problemas": sum(1 for i in items if i["possui_problemas"]),
             **presenters.listing(items),
         }
+
+
+# -- Avaliação em lote (job) -------------------------------------------------
+def start_batch_evaluation(uow: UnitOfWork, project_id: int, story_ids: list[int], author: str) -> dict:
+    """Valida as histórias e cria o job. Sem ids: todas as histórias ativas do projeto."""
+    require_project(uow, project_id)
+    active = {s["id"] for s in uow.stories.list_active(project_id)}
+    if story_ids:
+        invalid = [i for i in dict.fromkeys(story_ids) if i not in active]
+        if invalid:
+            raise BusinessValidationError(
+                "Há histórias que não pertencem ao projeto ou estão desaprovadas.", {"historia_ids": invalid}
+            )
+        selected = list(dict.fromkeys(story_ids))
+    else:
+        selected = sorted(active)
+    if not selected:
+        raise BusinessValidationError("Não há histórias para avaliar neste projeto.")
+    job = JobService(uow).create(
+        project_id, JobType.QUALITY_EVALUATION, {"historia_ids": selected, "responsavel": author}
+    )
+    return presenters.job(job)
+
+
+def _evaluate_one(container: Container, job_id: str, story_id: int) -> str | None:
+    """Avalia uma história em transação própria; devolve a mensagem de erro, se houver."""
+    try:
+        with container.uow() as uow:
+            QualityService(uow, container).evaluate(story_id)
+        return None
+    except AppError as exc:
+        logger.warning("Avaliação da história %s no job %s falhou: %s", story_id, job_id, exc.message)
+        return exc.message
+    except Exception as exc:
+        logger.exception("Falha inesperada ao avaliar a história %s no job %s", story_id, job_id)
+        return f"Erro inesperado: {type(exc).__name__}"
+
+
+def run_batch_evaluation(container: Container, job_id: str) -> None:
+    """Tarefa de background: avalia cada história; a falha de uma não interrompe as demais."""
+    with container.uow() as uow:
+        job = uow.jobs.get(job_id)
+        if not job:
+            return
+        JobService(uow).mark(job_id, JobStatus.PROCESSING)
+    story_ids = job["parametros"]["historia_ids"]
+    evaluated, failures = [], []
+    for story_id in story_ids:
+        error = _evaluate_one(container, job_id, story_id)
+        if error:
+            failures.append({"historia_id": story_id, "erro": error})
+        else:
+            evaluated.append(story_id)
+    result = {
+        "historias_avaliadas": evaluated, "total": len(evaluated), "falhas": failures,
+        "mensagem": f"{len(evaluated)} de {len(story_ids)} história(s) avaliada(s).",
+    }
+    with container.uow() as uow:
+        if story_ids and not evaluated:
+            JobService(uow).mark(job_id, JobStatus.ERROR, result=result,
+                                 error="Nenhuma história pôde ser avaliada.")
+        else:
+            JobService(uow).mark(job_id, JobStatus.COMPLETED, result=result)

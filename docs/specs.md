@@ -138,7 +138,7 @@ fontes (JSON `["audio:4"]`), status (`pendente|aprovada|rejeitada`), editada (0/
 versao_aplicada, historia_criada_id, job_id, criado_em, atualizado_em.
 
 ### 3.12 `jobs`
-id (uuid hex), projeto_id, tipo (`geracao_historias|analise_atualizacao`), status
+id (uuid hex), projeto_id, tipo (`geracao_historias|analise_atualizacao|avaliacao_qualidade`), status
 (`pendente|processando|concluido|erro`), parametros (JSON), resultado (JSON), mensagem_erro,
 criado_em, atualizado_em, concluido_em.
 

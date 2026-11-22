@@ -56,6 +56,7 @@ class JobStatus(LabeledEnum):
 class JobType(LabeledEnum):
     STORY_GENERATION = "geracao_historias"
     UPDATE_ANALYSIS = "analise_atualizacao"
+    QUALITY_EVALUATION = "avaliacao_qualidade"
 
 
 class SourceType(LabeledEnum):
@@ -116,6 +117,7 @@ LABELS: dict[Enum, str] = {
     JobStatus.ERROR: "Erro",
     JobType.STORY_GENERATION: "Geração de histórias",
     JobType.UPDATE_ANALYSIS: "Análise de novas fontes",
+    JobType.QUALITY_EVALUATION: "Avaliação de qualidade",
     SourceType.AUDIO: "Áudio",
     SourceType.DOCUMENT: "Documento",
     ChangeType.MANUAL: "Manual",

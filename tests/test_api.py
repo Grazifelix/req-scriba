@@ -125,6 +125,14 @@ def test_full_flow(client):
     assert story["validada"] is False and story["fontes_audio"]
     assert client.get(f"{API}/projetos/{project_id}/historias", params={"status": "em_revisao"}).json()["total"] == 1
 
+    # US-07: avaliação em lote das histórias recém-geradas (job)
+    batch = client.post(f"{API}/projetos/{project_id}/historias/avaliar",
+                        json={"historia_ids": job["resultado"]["historias_criadas"]}, headers=headers)
+    assert batch.status_code == 202 and batch.json()["tipo"] == "avaliacao_qualidade"
+    batch = client.get(f"{API}/jobs/{batch.json()['id']}").json()
+    assert batch["status"] == "concluido" and batch["resultado"]["total"] == 2
+    assert client.get(f"{API}/historias/{story_id}").json()["qualidade_geral"]["porcentagem"] is not None
+
     # US-07/08/09
     evaluation = client.post(f"{API}/historias/{story_id}/avaliar")
     assert evaluation.status_code == 200 and evaluation.json()["qualidade_geral"]["total_criterios"] == 13
@@ -258,7 +266,8 @@ def test_openapi_documents_all_routes(client):
         "/historias/{historia_id}/versoes", "/historias/{historia_id}/versoes/{numero}",
         "/historias/{historia_id}/avaliar", "/historias/{historia_id}/avaliacoes",
         "/historias/{historia_id}/avaliacoes/comparacao", "/historias/{historia_id}/defeitos",
-        "/projetos/{projeto_id}/qualidade", "/historias/{historia_id}/perguntas/gerar",
+        "/projetos/{projeto_id}/qualidade", "/projetos/{projeto_id}/historias/avaliar",
+        "/historias/{historia_id}/perguntas/gerar",
         "/projetos/{projeto_id}/perguntas", "/projetos/{projeto_id}/followup", "/perguntas/{pergunta_id}",
         "/perguntas/{pergunta_id}/aprovar", "/perguntas/{pergunta_id}/rejeitar", "/perguntas/{pergunta_id}/responder",
         "/projetos/{projeto_id}/atualizacoes/analisar", "/projetos/{projeto_id}/sugestoes-atualizacao",

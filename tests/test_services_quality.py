@@ -2,10 +2,12 @@
 
 import pytest
 
-from app.core.errors import ConflictError, ExternalServiceError
+from app.core.errors import BusinessValidationError, ConflictError, ExternalServiceError
 from app.domain import qus
-from app.services.quality import QualityService
+from app.domain.enums import StoryStatus
+from app.services.quality import QualityService, run_batch_evaluation, start_batch_evaluation
 from app.services.stories import StoryService
+from tests.fakes import default_individual
 
 
 def create(container, project_id, **data):
@@ -117,6 +119,74 @@ def test_project_overview_identifies_problems(container, project_id):
     assert overview["itens"][0]["avaliada"] is False  # não avaliadas primeiro
     assert overview["distribuicao"]["Alta"] == 1 and overview["distribuicao"]["Sem avaliação"] == 1
     assert overview["qualidade_geral"] == {"porcentagem": 92.31, "status": "Alta", "historias_avaliadas": 1}
+
+
+def start_batch(container, project_id, story_ids):
+    with container.uow() as uow:
+        return start_batch_evaluation(uow, project_id, story_ids, "ana")["id"]
+
+
+def job_of(container, job_id):
+    with container.uow() as uow:
+        return uow.jobs.get(job_id)
+
+
+def test_batch_evaluation_evaluates_every_story(container, project_id):
+    first = create(container, project_id, **FULL)
+    second = create(container, project_id, funcionalidade="cadastrar novos alunos")
+    job_id = start_batch(container, project_id, [first, second])
+    run_batch_evaluation(container, job_id)
+    job = job_of(container, job_id)
+    assert job["status"] == "concluido" and job["tipo"] == "avaliacao_qualidade"
+    assert job["resultado"]["historias_avaliadas"] == [first, second] and job["resultado"]["falhas"] == []
+    with container.uow() as uow:
+        assert all(uow.evaluations.latest(s) for s in (first, second))
+
+
+def test_batch_evaluation_without_ids_uses_active_stories(container, project_id):
+    kept = create(container, project_id, **FULL)
+    rejected = create(container, project_id, funcionalidade="cadastrar novos alunos")
+    with container.uow() as uow:
+        StoryService(uow).set_status(rejected, StoryStatus.REJECTED)
+    job_id = start_batch(container, project_id, [])
+    assert job_of(container, job_id)["parametros"]["historia_ids"] == [kept]
+
+
+def test_batch_evaluation_failure_of_one_story_does_not_stop_others(container, project_id):
+    good = create(container, project_id, **FULL)
+    bad = create(container, project_id, funcionalidade="cadastrar novos alunos")
+
+    def fail_for_bad(prompt):
+        if "cadastrar novos alunos" in prompt:
+            raise ExternalServiceError("LLM indisponível (simulado).")
+        return default_individual(prompt)
+    container.llm.handlers["AVALIACAO_QUS_INDIVIDUAL"] = fail_for_bad
+    job_id = start_batch(container, project_id, [bad, good])
+    run_batch_evaluation(container, job_id)
+    job = job_of(container, job_id)
+    assert job["status"] == "concluido" and job["resultado"]["historias_avaliadas"] == [good]
+    assert job["resultado"]["falhas"][0]["historia_id"] == bad
+
+
+def test_batch_evaluation_marks_error_when_every_story_fails(container, project_id):
+    story_id = create(container, project_id, **FULL)
+    job_id = start_batch(container, project_id, [story_id])
+    container.llm.fail = True
+    run_batch_evaluation(container, job_id)
+    job = job_of(container, job_id)
+    assert job["status"] == "erro" and job["mensagem_erro"]
+
+
+def test_batch_evaluation_rejects_invalid_stories(container, project_id):
+    story_id = create(container, project_id, **FULL)
+    with container.uow() as uow:
+        StoryService(uow).set_status(story_id, StoryStatus.REJECTED)
+    with pytest.raises(BusinessValidationError):
+        start_batch(container, project_id, [story_id])  # desaprovada
+    with pytest.raises(BusinessValidationError):
+        start_batch(container, project_id, [999])  # inexistente
+    with pytest.raises(BusinessValidationError):
+        start_batch(container, project_id, [])  # projeto sem histórias ativas
 
 
 def test_llm_unavailable_raises_external_error(container, project_id):

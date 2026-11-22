@@ -13,6 +13,13 @@ QuestionText = Annotated[str, StringConstraints(strip_whitespace=True, min_lengt
 
 
 # -- Qualidade --------------------------------------------------------------
+class BatchEvaluationRequest(InputModel):
+    historia_ids: list[int] = Field(
+        default_factory=list, max_length=200,
+        description="Histórias a avaliar. Vazio: todas as histórias ativas do projeto.",
+    )
+
+
 class EvaluationOut(OutputModel):
     id: int
     historia_id: int

@@ -12,12 +12,12 @@ from app.db.unit_of_work import UnitOfWork
 from app.domain.enums import QuestionStatus
 from app.schemas.common import ERROR_RESPONSES
 from app.schemas.workflow import (
-    AnalysisRequest, ComparisonOut, DefectList, EvaluationList, EvaluationOut, FollowupOut, JobList, JobOut,
+    AnalysisRequest, BatchEvaluationRequest, ComparisonOut, DefectList, EvaluationList, EvaluationOut, FollowupOut, JobList, JobOut,
     QualityOverviewOut, QuestionAnswer, QuestionGenerateOut, QuestionGenerateRequest, QuestionList, QuestionOut,
     QuestionUpdate, SuggestionApprove, SuggestionEdit, SuggestionList, SuggestionOut,
 )
 from app.services.jobs import JobService
-from app.services.quality import QualityService
+from app.services.quality import QualityService, start_batch_evaluation
 from app.services.questions import QuestionService
 from app.services.updates import UpdateService, start_analysis
 from app.workers import tasks
@@ -43,6 +43,21 @@ def _updates(uow: UnitOfWork = Depends(get_uow)) -> UpdateService:
              description="Avalia os 13 critérios QUS da versão atual. Avaliações anteriores são preservadas.")
 def evaluate(historia_id: int, service: QualityService = Depends(_quality)):
     return service.evaluate(historia_id)
+
+
+@router.post("/projetos/{projeto_id}/historias/avaliar", response_model=JobOut,
+             status_code=status.HTTP_202_ACCEPTED, tags=["Qualidade"],
+             summary="Avaliar várias histórias com QUS em lote (US-07)",
+             description="Cria um job assíncrono que avalia cada história informada (ou todas as ativas, se a "
+                         "lista vier vazia). A falha de uma história não interrompe as demais.")
+def evaluate_batch(
+    projeto_id: int, background: BackgroundTasks, body: Optional[BatchEvaluationRequest] = None,
+    uow: UnitOfWork = Depends(get_uow), container: Container = Depends(get_container), actor: str = Depends(get_actor),
+):
+    job = start_batch_evaluation(uow, projeto_id, body.historia_ids if body else [], actor)
+    uow.commit()
+    background.add_task(tasks.run_batch_evaluation, container, job["id"])
+    return job
 
 
 @router.get("/historias/{historia_id}/avaliacoes", response_model=EvaluationList, tags=["Qualidade"],

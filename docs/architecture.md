@@ -415,6 +415,7 @@ aprova/edita/rejeita → aplicação gera nova versão + evidências `atualizaca
 | D21 | Análise das fontes persistida (uma por geração), com CRUD por item | O analista precisa ver e corrigir como a IA entendeu a reunião. Uma análise por geração preserva o histórico sem mesclagem automática. Itens em tabela própria (`itens_analise`, colunas genéricas `texto`/`complemento`/`referencias`) permitem editar um item por vez. Evidências são cópias dos trechos reais (rótulos resolvidos pelo código, como em D5). Códigos RN/FN são renumerados globalmente quando há vários lotes. |
 | D22 | Análise revisada como contexto confirmado | A análise mais recente com `revisada = true` entra nos prompts de extração (geração e novas fontes) como informação confirmada por humano: papéis de usuário, requisitos de negócio e itens fora de escopo. Ela não é fonte: toda HU continua precisando de rótulos `F`. É descontada do orçamento de cada lote. |
 | D23 | Rótulos estritos e citação conferida | `normalize_label` aceitava "FN1" como "F1" (pega o número), o que daria evidência errada sem aviso. Agora só aceita número que não venha colado a letra ou dígito. Cada HU traz uma `citacao` literal, conferida (ignorando acentos e pontuação) contra o texto dos trechos citados; se não bater, vira `afirmacoes_sem_evidencia`. Lacunas de conjunto (`conflito`, `fluxo_incompleto`) viram `informacoes_ausentes` e, por isso, defeitos e perguntas de follow-up. |
+| D24 | Avaliação QUS em lote como job (`avaliacao_qualidade`) | Cada avaliação faz 1–2 chamadas ao LLM; avaliar várias HU numa requisição estouraria timeouts. O job reaproveita `QualityService.evaluate` com uma transação por história (cada nota é gravada assim que sai), registra falhas por história sem interromper o lote e só fica `erro` se nenhuma for avaliada. O frontend oferece o lote ao fim de uma geração, para as HU recém-criadas. |
 
 **Dependências e justificativas:** `fastapi`/`uvicorn` (API), `python-multipart` (upload),
 `requests` (provedores de LLM e embeddings, exigido), `chromadb` (vetores, exigido), `pypdf` e `python-docx` (extração
@@ -511,6 +512,7 @@ Cabeçalho opcional `X-Usuario` (responsável pelas alterações; padrão `engen
 | Método | Rota | Descrição |
 |---|---|---|
 | POST | `/historias/{historia_id}/avaliar` | Avaliar/reavaliar versão atual (QUS) |
+| POST | `/projetos/{projeto_id}/historias/avaliar` | Avaliar em lote `historia_ids` (vazio = todas as ativas) → `202` job |
 | GET | `/historias/{historia_id}/avaliacoes` | Histórico de avaliações |
 | GET | `/historias/{historia_id}/avaliacoes/comparacao?de=&para=` | Comparar duas avaliações |
 | GET | `/historias/{historia_id}/defeitos` | Defeitos e lacunas atuais |
