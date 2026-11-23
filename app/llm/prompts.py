@@ -376,23 +376,43 @@ Avalie a História de Usuário abaixo segundo os 8 critérios individuais do fra
 Para cada critério responda "resultado" ("Atende", "Atenção" ou "Não atende"), "evidencia"
 (justificativa objetiva citando a história) e "acao" (correção sugerida ou "Nenhuma ação necessária").
 Liste também as "lacunas": informações necessárias que estão ausentes ou mal definidas (não as invente).
-Se a história violar "atomic", a "reescrita_sugerida" deve separá-la em histórias distintas.
 
 Critérios:
 {criteria}
 
 Formato: {{"avaliacao_criterios": {example},
-"lacunas": [{{"elemento": "string", "descricao": "string"}}], "reescrita_sugerida": "string"}}
+"lacunas": [{{"elemento": "string", "descricao": "string"}}]}}
 
 HISTÓRIA:
 {_story_block(story)}
 """
 
 
-def set_evaluation_prompt(story: dict[str, Any], backlog: list[dict[str, Any]], keys: list[str]) -> str:
+def _problems_block(problems: dict[str, dict[str, Any]], gaps: list[dict[str, Any]]) -> str:
+    """Critérios já julgados que não atendem + lacunas, para a reescrita final."""
+    lines = []
+    for key, entry in problems.items():
+        detail = entry.get("evidencia") or entry.get("observacao") or ""
+        action = f" Ação: {entry['acao']}" if entry.get("acao") else ""
+        lines.append(f"- [{key}] {entry['resultado']}: {detail}{action}")
+    lines += [f"- [lacuna] {g.get('elemento') or 'informação'}: {g.get('descricao') or ''}" for g in gaps]
+    return "\n".join(lines) or "- (nenhum)"
+
+
+def set_evaluation_prompt(
+    story: dict[str, Any],
+    backlog: list[dict[str, Any]],
+    keys: list[str],
+    problems: dict[str, dict[str, Any]] | None = None,
+    gaps: list[dict[str, Any]] | None = None,
+) -> str:
+    """Última chamada da avaliação: critérios de conjunto e, ao final, a reescrita que resolve tudo."""
     criteria = "\n".join(f"- {k}: {EVAL_SET_CRITERIA[k]}" for k in keys)
     others = "\n".join(f"- {s['codigo']}: {s['historia']}" for s in backlog) or "- (nenhuma outra história)"
     return f"""### TAREFA: AVALIACAO_QUS_CONJUNTO
+Faça as duas etapas abaixo, nesta ordem.
+
+## ETAPA 1: Avaliar o conjunto (campo "analise_transversal_conjunto")
 Avalie a HISTÓRIA ALVO em relação às demais histórias do backlog, apenas nos critérios abaixo.
 Responda para cada critério "resultado" ("Atende", "Atenção" ou "Não atende") e "observacao"
 (cite os códigos das histórias relacionadas quando houver conflito, dependência ou lacuna).
@@ -400,7 +420,21 @@ Responda para cada critério "resultado" ("Atende", "Atenção" ou "Não atende"
 Critérios:
 {criteria}
 
-Formato: {{"analise_transversal_conjunto": {{"<criterio>": {{"resultado": "...", "observacao": "..."}}}}}}
+## ETAPA 2: Sugerir a melhoria (campo "reescrita_sugerida")
+Só depois de concluir a Etapa 1, reescreva a HISTÓRIA ALVO de modo a resolver TODOS os problemas: os da
+lista PROBLEMAS JÁ ENCONTRADOS e os que você apontou na Etapa 1 ("Atenção" ou "Não atende").
+- Use o formato "Como <perfil>, quero <funcionalidade>, para <benefício>".
+- Detalhes, telas, regras e ordem de implementação saem do texto da história.
+- Se for preciso dividir a história (atômica, estimável ou conceitualmente sólida), escreva todas em
+  sequência, como "H1: Como ...; H2: Como ...".
+- Não inclua códigos de história (ex.: US-001) no texto.
+- Se não houver nenhum problema a resolver, devolva "".
+
+PROBLEMAS JÁ ENCONTRADOS:
+{_problems_block(problems or {}, gaps or [])}
+
+Formato (nesta ordem): {{"analise_transversal_conjunto": {{"<criterio>": {{"resultado": "...", "observacao": "..."}}}},
+"reescrita_sugerida": "string"}}
 
 HISTÓRIA ALVO:
 {_story_block(story)}

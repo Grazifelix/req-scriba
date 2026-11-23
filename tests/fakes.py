@@ -42,13 +42,13 @@ def default_individual(prompt: str) -> dict[str, Any]:
         "well_formed", "atomic", "minimal", "conceptually_sound", "problem_oriented", "unambiguous",
         "full_sentence", "estimatable")}
     criteria["unambiguous"] = {"resultado": "Atenção", "evidencia": "Termo 'boletim' vago.", "acao": "Defina o formato."}
-    return {"avaliacao_criterios": criteria, "lacunas": [{"elemento": "formato", "descricao": "Formato do boletim não definido."}],
-            "reescrita_sugerida": "Como coordenador pedagógico, quero emitir o boletim em PDF, para acompanhar o desempenho."}
+    return {"avaliacao_criterios": criteria, "lacunas": [{"elemento": "formato", "descricao": "Formato do boletim não definido."}]}
 
 
 def default_set(prompt: str) -> dict[str, Any]:
     keys = re.findall(r"^- (conflict_free|independent|complete):", prompt, flags=re.M)
-    return {"analise_transversal_conjunto": {k: {"resultado": "Atende", "observacao": "ok"} for k in keys}}
+    return {"analise_transversal_conjunto": {k: {"resultado": "Atende", "observacao": "ok"} for k in keys},
+            "reescrita_sugerida": "Como coordenador pedagógico, quero emitir o boletim em PDF, para acompanhar o desempenho."}
 
 
 def default_questions(prompt: str) -> dict[str, Any]:

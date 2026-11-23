@@ -43,6 +43,17 @@ def test_alone_story_skips_llm_for_conflict_and_independence(container, project_
     assert "- complete:" in set_prompt and "- conflict_free:" not in set_prompt
 
 
+def test_rewrite_comes_last_with_all_problems(container, project_id):
+    story_id = create(container, project_id, **FULL)
+    result = evaluate(container, story_id)
+    [set_prompt] = container.llm.prompts_for("AVALIACAO_QUS_CONJUNTO")
+    problems = set_prompt.split("PROBLEMAS JÁ ENCONTRADOS:")[1]
+    assert "[unambiguous] Atenção: Termo 'boletim' vago." in problems
+    assert "[lacuna] formato" in problems and "[atomic]" not in problems
+    assert "reescrita_sugerida" not in container.llm.prompts_for("AVALIACAO_QUS_INDIVIDUAL")[0]
+    assert result["reescrita_sugerida"].startswith("Como coordenador")
+
+
 def test_deterministic_rules_override_llm(container, project_id):
     first = create(container, project_id, **FULL)
     duplicate = create(container, project_id, **FULL)

@@ -334,7 +334,7 @@ def _criteria_block(data: dict[str, Any], *container_names: str) -> dict[str, An
 
 
 def normalize_individual_evaluation(data: dict[str, Any]) -> dict[str, Any]:
-    """Retorna {"avaliacao_criterios", "lacunas", "reescrita_sugerida"} com os 8 critérios individuais."""
+    """Retorna {"avaliacao_criterios", "lacunas"} com os 8 critérios individuais."""
     block = _criteria_block(data, "avaliacao_criterios", "criterios", "criteria")
     criteria = {}
     for key in qus.INDIVIDUAL_CRITERIA:
@@ -349,8 +349,12 @@ def normalize_individual_evaluation(data: dict[str, Any]) -> dict[str, Any]:
     return {
         "avaliacao_criterios": criteria,
         "lacunas": _gaps(_pick(data, "lacunas", "informacoes_ausentes", "gaps")),
-        "reescrita_sugerida": _text(_pick(data, "reescrita_sugerida", "reescrita", "rewrite", "sugestao")),
     }
+
+
+def normalize_rewrite(data: dict[str, Any]) -> str | None:
+    """Reescrita sugerida ao final da avaliação de conjunto (None se vazia)."""
+    return _text(_pick(data, "reescrita_sugerida", "reescrita", "rewrite", "sugestao"))
 
 
 def normalize_set_analysis(data: dict[str, Any], keys: list[str]) -> dict[str, dict[str, str]]:

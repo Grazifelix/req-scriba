@@ -113,9 +113,18 @@ class QualityService:
 
         set_result = _deterministic_set(story, context)
         llm_keys = [k for k in qus.SET_CRITERIA if k not in set_result]
-        if llm_keys:
-            raw = llm.generate_json(prompts.SYSTEM, prompts.set_evaluation_prompt(story, context, llm_keys))
+        rewrite = None
+        if llm_keys:  # sempre há: "complete" não tem regra determinística
+            # A reescrita vem ao final desta última chamada, já com os problemas dos demais critérios.
+            problems = {
+                k: v for k, v in {**individual["avaliacao_criterios"], **set_result}.items()
+                if v["resultado"] != qus.MEETS
+            }
+            gaps = list(story["informacoes_ausentes"]) + individual["lacunas"]
+            prompt = prompts.set_evaluation_prompt(story, context, llm_keys, problems, gaps)
+            raw = llm.generate_json(prompts.SYSTEM, prompt)
             set_result.update(parsing.normalize_set_analysis(raw, llm_keys))
+            rewrite = parsing.normalize_rewrite(raw)
         set_result = {k: set_result[k] for k in qus.SET_CRITERIA}
 
         met = qus.count_met(individual["avaliacao_criterios"], set_result)
@@ -124,13 +133,13 @@ class QualityService:
             "historia_id": story_id, "versao_historia": story["versao_atual"], "porcentagem": score,
             "status": qus.quality_label(score), "criterios_atendidos": met,
             "avaliacao_criterios": individual["avaliacao_criterios"], "analise_transversal_conjunto": set_result,
-            "lacunas": individual["lacunas"], "reescrita_sugerida": individual["reescrita_sugerida"],
+            "lacunas": individual["lacunas"], "reescrita_sugerida": rewrite,
             "criado_em": utc_now_iso(),
         })
         self.uow.stories.update(story_id, {
             "qualidade_porcentagem": score, "qualidade_status": qus.quality_label(score),
             "qualidade_avaliacao_id": evaluation_id,
-            "sugestao_scriba": individual["reescrita_sugerida"] or story["sugestao_scriba"],
+            "sugestao_scriba": rewrite or story["sugestao_scriba"],
         })
         return presenters.evaluation(self.uow.evaluations.get(evaluation_id))
 
