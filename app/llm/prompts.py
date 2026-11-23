@@ -10,7 +10,7 @@ from typing import Any
 
 from app.domain import qus
 
-PROMPT_VERSION = "3.2"
+PROMPT_VERSION = "3.3"
 
 SYSTEM = (
     "Você é um engenheiro de requisitos sênior, especialista em Histórias de Usuário e no framework "
@@ -319,8 +319,56 @@ def _story_block(story: dict[str, Any]) -> str:
     )
 
 
+# Critérios QUS na forma de avaliação: mesmas definições e exemplos de QUS_INDIVIDUAL / QUS_SET,
+# com as instruções voltadas a julgar uma história pronta. As chaves seguem app.domain.qus.
+EVAL_INDIVIDUAL_CRITERIA: dict[str, str] = {
+    "well_formed": "Bem formada: tem perfil, funcionalidade e o benefício.",
+    "atomic": """Atômica: expressa exatamente requisito para uma única funcionalidade, sem agrupar recursos em um único texto.
+  Incorreto: "Como usuário, posso clicar em um local específico no mapa e, assim, realizar uma busca por pontos de interesse associados a essa combinação de latitude e longitude."
+  Correto: H1 "Como usuário, posso clicar em um local específico no mapa"; H2 "Como usuário, posso visualizar pontos de referência associados à combinação de latitude e longitude de um local específico.\"""",
+    "minimal": """Mínima: contém apenas perfil, funcionalidade e benefício. Detalhes, observações, telas e ordem de
+  implementação na história são violação: DEVEM se tornar critérios de aceitação ou ficar de fora.
+  Incorreto: "Como um profissional de saúde, quero visualizar as horas registradas esta semana (divididas por produtos e atividades). Veja: protótipo da Alice. OBS: primeiro crie a tela de visão geral e, depois, adicione as validações."
+  Correto: "Como um profissional de saúde, eu quero visualizar as horas registradas esta semana.\"""",
+    "conceptually_sound": """Conceitualmente sólida: a funcionalidade é o meio e o benefício é o motivo; o benefício não pode
+  esconder outra funcionalidade.
+  Incorreto: H1 "Como usuário, quero abrir o mapa interativo para visualizar a localização de pontos de referência." - funcionalidade "abrir o mapa", benefício "ver a localização dos estabelecimentos"
+  Correto: H1 "Como usuário, quero abrir o mapa interativo"; H2 "Como usuário, quero ver a localização de pontos de referência no mapa interativo.\"""",
+    "problem_oriented": """Orientada ao problema: descreve a necessidade, não a solução técnica.
+  Incorreto: "Como profissional de assistência, quero salvar um reembolso — adicionar botão de salvar no canto superior direito (nunca desabilitado)."
+  Correto: "Como profissional de saúde, quero garantir o reembolso.\"""",
+    "unambiguous": """Sem ambiguidade: não usa termos vagos ("conteúdo", "dados", "gerenciar", "melhorar"). Se a história usar
+  um termo vago sem defini-lo, aponte o termo e registre a falta da definição em "lacunas"; não invente a definição.
+  Incorreto: "Como usuário, posso editar o conteúdo que adicionei à página de perfil de uma pessoa."
+  Correto (se a fonte disser): "Como usuário, posso editar conteúdo de vídeo, foto e áudio que adicionei à página de perfil de uma pessoa.\"""",
+    "full_sentence": """Frase completa: a funcionalidade é uma ação clara, não um rótulo solto.
+  Incorreto: "configuração do servidor"
+  Correto: "Como administrador, quero configurar o arquivo sudoers do servidor\"""",
+    "estimatable": """Estimável: não pode ser tão ampla que impeça estimar o esforço; histórias amplas devem ser divididas.
+  Incorreto: H1 "Como profissional de assistência, quero visualizar minha lista de rotas para os próximos dias, para que eu possa me preparar (por exemplo, saber a que horas devo começar o deslocamento)."
+  Correto: H1 "Como profissional de assistência, quero visualizar minha lista de rotas para os próximos dias/dias futuros, para que eu possa me preparar"; H2 "Como gestor, quero carregar uma lista de rotas para profissionais de assistência.\"""",
+}
+
+EVAL_SET_CRITERIA: dict[str, str] = {
+    "unique": """Única: não repete outra história do backlog, nem com outras palavras; se outra descreve a mesma
+  necessidade, não atende (cite o código da outra).""",
+    "conflict_free": """Sem conflitos: não contradiz outra história do backlog. Se houver contradição, não atende: cite os
+  códigos e descreva o conflito, sem escolher um lado.
+  Incorreto: H1 "Como usuário, posso excluir apenas os pontos de referência que eu adicionei" H2 "Como usuário, posso editar qualquer ponto de referência"
+  Correto: H1 "Como usuário, posso excluir apenas os pontos de referência que eu adicionei" H2 "Como usuário, posso editar os pontos de referência que adicionei.\"""",
+    "uniform": """Uniforme: a funcionalidade segue o mesmo estilo das demais (verbo no infinitivo, minúsculas) e o perfil
+  é um papel, como nas demais histórias.""",
+    "independent": """Independente: pode ser implementada sem depender de outras histórias (cite os códigos das
+  dependências, se houver).""",
+    "complete": """Completa: o fluxo essencial desta necessidade não está incompleto no backlog (ex.: há "editar o pedido"
+  mas nada sobre criá-lo). Se estiver, descreva na observação qual história falta.
+  Incorreto: Ter uma história para editar um conteúdo, mas esquecer de criar uma história para adicionar esse conteúdo.
+  Correto: Ter o fluxo completo (ex: histórias para criar, visualizar e editar um registro)""",
+}
+
+
 def individual_evaluation_prompt(story: dict[str, Any]) -> str:
-    criteria = "\n".join(f"- {k}: {v}" for k, v in qus.INDIVIDUAL_CRITERIA.items())
+    criteria = "\n".join(f"- {k}: {EVAL_INDIVIDUAL_CRITERIA[k]}" for k in qus.INDIVIDUAL_CRITERIA)
     entry = '{"resultado": "Atende | Atenção | Não atende", "evidencia": "justificativa", "acao": "o que fazer"}'
     example = "{" + ", ".join(f'"{k}": {entry}' for k in qus.INDIVIDUAL_CRITERIA) + "}"
     return f"""### TAREFA: AVALIACAO_QUS_INDIVIDUAL
@@ -342,7 +390,7 @@ HISTÓRIA:
 
 
 def set_evaluation_prompt(story: dict[str, Any], backlog: list[dict[str, Any]], keys: list[str]) -> str:
-    criteria = "\n".join(f"- {k}: {qus.SET_CRITERIA[k]}" for k in keys)
+    criteria = "\n".join(f"- {k}: {EVAL_SET_CRITERIA[k]}" for k in keys)
     others = "\n".join(f"- {s['codigo']}: {s['historia']}" for s in backlog) or "- (nenhuma outra história)"
     return f"""### TAREFA: AVALIACAO_QUS_CONJUNTO
 Avalie a HISTÓRIA ALVO em relação às demais histórias do backlog, apenas nos critérios abaixo.
