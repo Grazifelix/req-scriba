@@ -1,6 +1,6 @@
 """Leitura tolerante e normalização das respostas JSON do LLM.
 
-Modelos pequenos (Qwen 3.5 4B) variam nomes de chaves, formatos de lista e valores. Estas funções
+Modelos locais (Llama 4 Scout, Qwen 3.5 4B) variam nomes de chaves, formatos de lista e valores. Estas funções
 convertem a saída para o contrato interno e descartam o que for inválido — nunca inventam dados.
 """
 
@@ -396,7 +396,7 @@ def normalize_questions(data: dict[str, Any], valid_refs: set[str]) -> tuple[lis
     return questions, limitations
 
 
-IMPACT_RELATIONS = {"sem_relacao", "complementa", "contradiz"}
+IMPACT_RELATIONS = {"sem_relacao", "confirma", "complementa", "contradiz"}
 
 
 def normalize_impact(data: dict[str, Any], valid_labels: set[str]) -> dict[str, Any]:

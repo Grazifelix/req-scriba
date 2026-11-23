@@ -392,11 +392,11 @@ Fakes: `FakeLLM` (roteia pelo marcador `### TAREFA:` do prompt), `FakeTranscribe
 |---|---|
 | `REQSCRIBA_DATA_DIR` | `./data` |
 | `REQSCRIBA_LLM_PROVIDER` | `ollama` (ou `openai_compatible`) |
-| `REQSCRIBA_LLM_MODEL` | `qwen3.5:4b` |
+| `REQSCRIBA_LLM_MODEL` | `llama4:scout` |
 | `REQSCRIBA_LLM_BASE_URL` | vazio; obrigatória em `openai_compatible` |
 | `REQSCRIBA_LLM_API_KEY` | vazio |
 | `REQSCRIBA_LLM_TIMEOUT` | `900` (aceita `REQSCRIBA_OLLAMA_TIMEOUT` como alternativa) |
-| `REQSCRIBA_LLM_TEMPERATURE` / `REQSCRIBA_LLM_NUM_CTX` | `0.1` / `8192` (`NUM_CTX` só no Ollama) |
+| `REQSCRIBA_LLM_TEMPERATURE` / `REQSCRIBA_LLM_NUM_CTX` | `0.1` / `16384` (`NUM_CTX` só no Ollama) |
 | `REQSCRIBA_OLLAMA_URL` | `http://localhost:11434` (usada se o Ollama não tiver URL própria) |
 | `REQSCRIBA_EMBEDDINGS_PROVIDER` | `ollama` (ou `openai_compatible`; `hash` para modo offline) |
 | `REQSCRIBA_EMBEDDING_MODEL` | `bge-m3` |

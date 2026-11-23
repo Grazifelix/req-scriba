@@ -15,7 +15,7 @@ por HTTP: veja o [guia de integração](docs/ux-guidelines.md#8-integração-do-
 | API | Python 3.11+ · FastAPI (JSON) |
 | Persistência | SQLite (`sqlite3` da stdlib) |
 | Banco vetorial | ChromaDB (persistente, cosseno) |
-| LLM | Configurável (Ollama ou API compatível com OpenAI). Padrão: Qwen 3.5 4B no Ollama |
+| LLM | Configurável (Ollama ou API compatível com OpenAI). Padrão: Llama 4 Scout no Ollama |
 | Embeddings | Configurável. Padrão: `bge-m3` no Ollama |
 | Chunking | Divisão recursiva por fronteiras estruturais (docs) · janelas de segmentos (transcrições) |
 | Transcrição | faster-whisper (opcional) |
@@ -50,7 +50,7 @@ make install          # ou: pip install -r requirements-dev.txt
 make install-asr      # opcional: transcrição local (faster-whisper)
 cp .env.example .env  # ajuste se necessário
 
-ollama pull qwen3.5:4b
+ollama pull llama4:scout   # modelo grande (dezenas de GB); em máquina modesta, use qwen3.5:4b e NUM_CTX 8192
 ollama pull bge-m3
 ```
 

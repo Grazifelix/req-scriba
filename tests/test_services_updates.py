@@ -139,6 +139,82 @@ def test_reject_preserves_story(container, project_id, approved_story):
     assert after["historia"] == before["historia"] and after["versao_atual"] == before["versao_atual"]
 
 
+def test_impact_prompt_carries_qus_rules_and_reviewed_analysis(container, project_id, approved_story):
+    new_doc = upload_document(container, project_id, NEW_DOC, "ata2.txt")
+    analyze(container, project_id, [new_doc])
+    prompt = container.llm.prompts_for("ANALISE_IMPACTO")[0]
+    assert "Atômica" in prompt and "Mínima" in prompt and "Dado …, quando …, então …" in prompt
+    assert "ANALISE DO PROJETO:" in prompt and "Campos atuais:" in prompt
+
+
+def test_partial_proposal_keeps_current_fields(container, project_id, approved_story):
+    def impact(prompt):  # modelo devolve só a funcionalidade alterada, sem benefício nem critérios
+        return {"relacao": "complementa", "justificativa": "PDF.", "fontes": ["F1"],
+                "proposta": {"funcionalidade": "emitir o boletim da turma em PDF", "beneficio": None,
+                             "criterios_aceitacao": []}}
+    container.llm.handlers["ANALISE_IMPACTO"] = impact
+    before = story(container, approved_story)
+    new_doc = upload_document(container, project_id, NEW_DOC, "ata2.txt")
+    analyze(container, project_id, [new_doc])
+    update = next(s for s in suggestions(container, project_id) if s["historia_id"] == approved_story)
+    proposed = update["conteudo_proposto"]
+    assert proposed["funcionalidade"] == "emitir o boletim da turma em PDF"
+    assert proposed["beneficio"] == before["beneficio"] and proposed["perfil"] == before["perfil"]
+    assert proposed["criterios_aceitacao"] == before["criterios_aceitacao"]
+
+
+def test_complement_without_real_change_attaches_evidence(container, project_id, approved_story):
+    current = story(container, approved_story)
+
+    def impact(prompt):  # "complementa", mas copia a história (só muda título, caixa e pontuação)
+        return {"relacao": "complementa", "justificativa": "Mais contexto.", "fontes": ["F1"],
+                "proposta": {"titulo": "Outro título", "perfil": current["perfil"].upper(),
+                             "funcionalidade": current["funcionalidade"] + ".", "beneficio": current["beneficio"],
+                             "criterios_aceitacao": [{"titulo": "X", "criterio": c["criterio"]}
+                                                     for c in reversed(current["criterios_aceitacao"])]}}
+    container.llm.handlers["ANALISE_IMPACTO"] = impact
+    new_doc = upload_document(container, project_id, NEW_DOC, "ata2.txt")
+    job = analyze(container, project_id, [new_doc])
+    assert job["status"] == "concluido"
+    assert not [s for s in suggestions(container, project_id) if s["historia_id"] == approved_story]
+    attached = job["resultado"]["evidencias_anexadas"]
+    assert [a["historia_id"] for a in attached] == [approved_story]
+    assert "anexadas como evidência em: US-" in job["resultado"]["mensagem"]
+    after = story(container, approved_story)
+    assert any(f["nome_arquivo"] == "ata2.txt" for f in after["fontes_documentos"])
+    assert after["historia"] == current["historia"] and after["versao_atual"] == current["versao_atual"]
+
+
+def test_confirmation_attaches_only_cited_chunks_and_is_idempotent(container, project_id, approved_story):
+    container.llm.handlers["ANALISE_IMPACTO"] = lambda prompt: (
+        {"relacao": "confirma", "justificativa": "Mesma necessidade.", "fontes": ["F1"], "proposta": None}
+        if "boletim" in prompt.split("HISTÓRIA EXISTENTE:")[1].lower()
+        else {"relacao": "sem_relacao", "justificativa": "", "fontes": []})
+    new_doc = upload_document(container, project_id, NEW_DOC, "ata2.txt")
+    first = analyze(container, project_id, [new_doc])
+    assert len(first["resultado"]["evidencias_anexadas"]) == 1
+    assert len(first["resultado"]["evidencias_anexadas"][0]["evidencia_ids"]) == 1  # só o trecho F1 citado
+    second = analyze(container, project_id, [new_doc])
+    assert second["resultado"]["evidencias_anexadas"] == []  # mesmo trecho não é anexado duas vezes
+
+
+def test_confirmation_without_cited_source_attaches_nothing(container, project_id, approved_story):
+    container.llm.handlers["ANALISE_IMPACTO"] = lambda prompt: {
+        "relacao": "confirma", "justificativa": "x", "fontes": [], "proposta": None}
+    new_doc = upload_document(container, project_id, NEW_DOC, "ata2.txt")
+    job = analyze(container, project_id, [new_doc])
+    assert job["resultado"]["evidencias_anexadas"] == []
+
+
+def test_contradiction_is_kept_even_without_proposal(container, project_id, approved_story):
+    container.llm.handlers["ANALISE_IMPACTO"] = lambda prompt: {
+        "relacao": "contradiz", "justificativa": "A ata diz o oposto.", "fontes": ["F1"], "proposta": None}
+    new_doc = upload_document(container, project_id, NEW_DOC, "ata2.txt")
+    analyze(container, project_id, [new_doc])
+    kept = [s for s in suggestions(container, project_id) if s["historia_id"] == approved_story]
+    assert len(kept) == 1 and kept[0]["tipo"] == "contradiz"
+
+
 def test_new_audio_source_and_failure_handling(container, project_id, approved_story):
     new_audio = upload_audio(container, project_id, "entrevista2.wav")
     container.llm.fail = True

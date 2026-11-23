@@ -12,7 +12,7 @@ from app.db.unit_of_work import UnitOfWork
 from app.domain.enums import (
     ChangeOrigin, ChangeType, JobStatus, JobType, SourceType, SuggestionStatus, SuggestionType,
 )
-from app.domain.text import similarity
+from app.domain.text import normalize, similarity
 from app.llm import parsing, prompts
 from app.services import presenters
 from app.services.common import require_project
@@ -41,17 +41,48 @@ def start_analysis(uow: UnitOfWork, project_id: int, audio_ids: list[int], docum
     return presenters.job(job)
 
 
-def _analyze_story(container: Container, story: dict, chunks: list[dict]) -> dict | None:
-    """Chama o LLM de impacto. Retorna dados da sugestão ou None (sem relação)."""
+def _proposal(current: dict, proposed: dict | None) -> dict:
+    """Aplica a proposta sobre o conteúdo atual. Campo omitido ou vazio na resposta do modelo mantém o valor atual
+    (o modelo pode devolver só o que mudou; sobrescrever apagaria benefício ou critérios)."""
+    if not proposed:
+        return current
+    changes = {k: proposed[k] for k in EDITABLE_FIELDS if proposed.get(k)}
+    content = build_content({**current, **changes})
+    if proposed.get("informacoes_ausentes"):
+        content["informacoes_ausentes"] = proposed["informacoes_ausentes"]
+    return content
+
+
+def _content_key(content: dict) -> tuple:
+    """Conteúdo relevante normalizado: título, numeração e ordem dos critérios e pontuação não contam como mudança."""
+    criteria = frozenset(normalize(c.get("criterio")) for c in content.get("criterios_aceitacao") or [])
+    return (normalize(content.get("perfil")), normalize(content.get("funcionalidade")),
+            normalize(content.get("beneficio")), criteria - {""})
+
+
+CONFIRMATION_CLAIM = "Fonte nova que confirma a história sem alterá-la (anexada automaticamente)."
+
+
+def _analyze_story(container: Container, story: dict, chunks: list[dict], reviewed_text: str | None = None) -> dict | None:
+    """Chama o LLM de impacto. Retorna None (sem relação), uma confirmação ou os dados de uma sugestão."""
     blocks, mapping = label_chunks(chunks)
-    impact = parsing.normalize_impact(
-        container.llm.generate_json(prompts.SYSTEM, prompts.impact_prompt(story, blocks)), set(mapping)
-    )
+    prompt = prompts.impact_prompt(story, blocks, reviewed_text)
+    impact = parsing.normalize_impact(container.llm.generate_json(prompts.SYSTEM, prompt), set(mapping))
     if impact["relacao"] == "sem_relacao":
         return None
-    cited = [mapping[label] for label in impact["fontes"]] or chunks
+    cited = [mapping[label] for label in impact["fontes"]]
     current = snapshot(story)
-    proposal = build_content({**current, **impact["proposta"]}) if impact["proposta"] else current
+    proposal = _proposal(current, impact["proposta"])
+    # "confirma", ou "complementa" que só copia a história: a fonte sustenta a HU sem mudar o conteúdo.
+    # Os trechos citados viram evidência direto, sem sugestão (decisão do produto, D27). "contradiz" sempre vira sugestão.
+    unchanged = impact["relacao"] == SuggestionType.COMPLEMENTS.value and _content_key(proposal) == _content_key(current)
+    if impact["relacao"] == "confirma" or unchanged:
+        if not cited:  # sem trecho citado não há o que anexar; os trechos seguem para novos requisitos
+            return None
+        return {"confirmacao": True, "historia_id": story["id"], "codigo": story.get("codigo"),
+                "evidencias": [evidence_spec(c, CONFIRMATION_CLAIM) for c in cited],
+                "chunk_ids": {c["id"] for c in cited}}
+    cited = cited or chunks
     return {
         "historia_id": story["id"], "tipo": impact["relacao"], "justificativa": impact["justificativa"]
         or "O modelo identificou relação entre a história e os novos trechos.",
@@ -112,18 +143,18 @@ def run_update_analysis(container: Container, job_id: str) -> None:
             reviewed = analysis_text(uow, uow.analyses.latest_reviewed(project_id))
         # contexto só quando as fontes novas não cabem numa chamada; falhas não derrubam o job
         context = None if fits_in_one_call(container, new_chunks, reviewed) else build_context(container, new_chunks)
-        drafts, used, failures, attempts, consolidation = [], set(), [], 0, None
+        drafts, confirmations, used, failures, attempts, consolidation = [], [], set(), [], 0, None
         for story in stories:
             if not related[story["id"]]:
                 continue
             attempts += 1
             try:
-                draft = _analyze_story(container, story, related[story["id"]])
+                draft = _analyze_story(container, story, related[story["id"]], reviewed)
             except AppError as exc:
                 failures.append({"historia": story["codigo"], "erro": exc.message})
                 continue
             if draft:
-                drafts.append(draft)
+                (confirmations if draft.get("confirmacao") else drafts).append(draft)
                 used |= draft["chunk_ids"]
         unmatched = [c for c in new_chunks if c["id"] not in used]
         if unmatched:
@@ -145,17 +176,37 @@ def run_update_analysis(container: Container, job_id: str) -> None:
                 })
                 for d in drafts
             ]
+            attached = _attach_confirmations(uow, confirmations)
             JobService(uow).mark(job_id, JobStatus.COMPLETED, result={
                 "sugestoes_criadas": created, "total": len(created), "historias_analisadas": len(stories),
-                "trechos_novos": len(new_chunks), "falhas": failures,
+                "evidencias_anexadas": attached, "trechos_novos": len(new_chunks), "falhas": failures,
                 "contexto": context.summary() if context else None, "consolidacao": consolidation,
-                "mensagem": None if created else "Nenhuma atualização ou novo requisito identificado nas novas fontes.",
+                "mensagem": _result_message(len(created), attached),
             })
     except AppError as exc:
         _fail(container, job_id, exc.message)
     except Exception as exc:
         logger.exception("Falha inesperada no job %s", job_id)
         _fail(container, job_id, f"Erro inesperado: {type(exc).__name__}")
+
+
+def _attach_confirmations(uow: UnitOfWork, confirmations: list[dict]) -> list[dict]:
+    """Anexa as fontes que confirmam uma HU como evidências atuais, sem sugestão e sem nova versão (D27).
+    O conteúdo não muda; a próxima versão criada passa a incluir essas evidências."""
+    attached = []
+    for c in confirmations:
+        ids = add_evidences(uow, c["historia_id"], c["evidencias"], "atualizacao")
+        if ids:
+            attached.append({"historia_id": c["historia_id"], "historia_codigo": c["codigo"], "evidencia_ids": ids})
+    return attached
+
+
+def _result_message(created: int, attached: list[dict]) -> str | None:
+    """None quando só há sugestões (o cliente monta a contagem); senão, texto com as evidências anexadas."""
+    if not attached:
+        return None if created else "Nenhuma atualização ou novo requisito identificado nas novas fontes."
+    codes = ", ".join(a["historia_codigo"] or str(a["historia_id"]) for a in attached)
+    return f"{created} sugestão(ões) criada(s). Novas fontes anexadas como evidência em: {codes}."
 
 
 def _fail(container: Container, job_id: str, message: str) -> None:

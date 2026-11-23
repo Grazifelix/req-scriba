@@ -59,7 +59,8 @@ def default_questions(prompt: str) -> dict[str, Any]:
 
 
 def default_impact(prompt: str) -> dict[str, Any]:
-    if "boletim" in prompt.split("NOVOS TRECHOS:")[0].lower():
+    existing = prompt.split("HISTÓRIA EXISTENTE:")[1].split("### TAREFA")[0]
+    if "boletim" in existing.lower():
         return {"relacao": "complementa", "justificativa": "Define o formato PDF.",
                 "proposta": {"titulo": "Emitir boletim em PDF", "perfil": "coordenador pedagógico",
                              "funcionalidade": "emitir o boletim da turma em PDF",
