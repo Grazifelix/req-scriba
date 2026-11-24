@@ -67,6 +67,16 @@ def parse_story_text(text: str) -> dict[str, str | None] | None:
     return None
 
 
+_SPLIT_MARKER_RE = re.compile(r"\bH\d+\s*:\s*", re.IGNORECASE)
+
+
+def split_story_texts(text: str) -> list[str]:
+    """Separa uma reescrita "H1: Como …; H2: Como …" em textos de histórias. Sem marcadores: [texto]."""
+    parts = [p.strip().rstrip(";").strip() for p in _SPLIT_MARKER_RE.split(text or "")]
+    parts = [p for p in parts if p]
+    return parts or [(text or "").strip()]
+
+
 def follows_template(perfil: str | None, funcionalidade: str | None, beneficio: str | None) -> bool:
     return not missing_elements(perfil, funcionalidade, beneficio)
 

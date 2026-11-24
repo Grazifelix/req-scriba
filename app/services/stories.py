@@ -4,17 +4,25 @@ from __future__ import annotations
 
 from typing import Any
 
+from app.core.container import Container
 from app.core.errors import BusinessValidationError, NotFoundError
 from app.core.time import utc_now_iso
 from app.db.unit_of_work import UnitOfWork
 from app.domain import story_format
 from app.domain.enums import ChangeOrigin, ChangeType, StoryStatus
+from app.llm import parsing, prompts
 from app.services import presenters
 from app.services.common import require_project, require_story
 from app.services.evidence import NO_SOURCE_CLAIM, add_evidences
+from app.services.retrieval import describe_chunk
 from app.services.versioning import create_version, snapshot
 
 TEMPLATE_ELEMENTS = set(story_format.ELEMENTS)
+MAX_SPLIT_EVIDENCE_BLOCKS = 8
+MISSING_CRITERIA = {
+    "elemento": "criterios_aceitacao",
+    "descricao": "Não houve base nas fontes para critérios de aceitação desta história, criada na divisão de outra.",
+}
 
 
 def number_criteria(criteria: list[dict] | None) -> list[dict]:
@@ -108,9 +116,19 @@ def apply_content_change(uow: UnitOfWork, story: dict, changes: dict) -> dict | 
     return content
 
 
+def _parse_or_fail(text: str) -> dict:
+    parsed = story_format.parse_story_text(text)
+    if parsed is None:
+        raise BusinessValidationError(
+            "O texto da história deve seguir o padrão 'Como [perfil], quero [funcionalidade], para [benefício]'."
+        )
+    return parsed
+
+
 class StoryService:
-    def __init__(self, uow: UnitOfWork) -> None:
+    def __init__(self, uow: UnitOfWork, container: Container | None = None) -> None:
         self.uow = uow
+        self.container = container  # só a divisão de história usa o LLM
 
     def detail(self, story_id: int) -> dict:
         story = require_story(self.uow, story_id)
@@ -143,15 +161,46 @@ class StoryService:
         changes = dict(changes)
         text = changes.pop("historia", None)
         if text is not None:
-            parsed = story_format.parse_story_text(text)
-            if parsed is None:
-                raise BusinessValidationError(
-                    "O texto da história deve seguir o padrão 'Como [perfil], quero [funcionalidade], para [benefício]'."
-                )
-            changes = {**parsed, **changes}  # campos explícitos têm precedência sobre o texto
+            changes = {**_parse_or_fail(text), **changes}  # campos explícitos têm precedência sobre o texto
         if apply_content_change(self.uow, story, changes):
             create_version(self.uow, story_id, ChangeType.MANUAL, ChangeOrigin.MANUAL_EDIT, author)
         return self.detail(story_id)
+
+    def apply_rewrite(self, story_id: int, text: str, author: str) -> dict:
+        """Aplica a reescrita da avaliação. Se ela divide a história ("H1: …; H2: …"), a primeira parte
+        substitui a história atual e as demais viram histórias novas com as mesmas evidências. Na divisão,
+        o LLM escreve critérios de aceitação próprios para cada parte."""
+        story = require_story(self.uow, story_id)
+        texts = story_format.split_story_texts(text)
+        parsed = [_parse_or_fail(part) for part in texts]
+        evidences = self.uow.evidences.list_by_story(story_id)  # herdadas, com a origem de cada uma
+        if len(parsed) > 1:
+            for fields, criteria in zip(parsed, self._split_criteria(story, texts, evidences)):
+                fields["criterios_aceitacao"] = criteria
+            if not parsed[0]["criterios_aceitacao"]:
+                del parsed[0]["criterios_aceitacao"]  # sem base para novos: a original mantém os atuais
+        if apply_content_change(self.uow, story, parsed[0]):
+            create_version(self.uow, story_id, ChangeType.MANUAL, ChangeOrigin.MANUAL_EDIT, author)
+        created = [
+            create_story_record(
+                self.uow, story["projeto_id"],
+                {**fields, "informacoes_ausentes": [] if fields["criterios_aceitacao"] else [MISSING_CRITERIA]},
+                origin="manual", change_type=ChangeType.MANUAL, change_origin=ChangeOrigin.MANUAL_CREATION,
+                author=author, evidence_specs=evidences,
+            )
+            for fields in parsed[1:]
+        ]
+        return {"historia": self.detail(story_id), "historias_criadas": [self.detail(i) for i in created]}
+
+    def _split_criteria(self, story: dict, texts: list[str], evidences: list[dict]) -> list[list[dict]]:
+        if self.container is None:
+            raise RuntimeError("A divisão de história exige o container com o LLM.")
+        blocks = [
+            {"rotulo": f"E{i}", "descricao": describe_chunk({**e, "texto": e["trecho"]}), "texto": e["trecho"]}
+            for i, e in enumerate(evidences[:MAX_SPLIT_EVIDENCE_BLOCKS], start=1)
+        ]
+        data = self.container.llm.generate_json(prompts.SYSTEM, prompts.split_criteria_prompt(story, texts, blocks))
+        return parsing.normalize_split_criteria(data, len(texts))
 
     def set_status(self, story_id: int, status: StoryStatus) -> dict:
         """US-06 CA02/CA03: aprovação e desaprovação (não criam versão de conteúdo)."""

@@ -357,6 +357,19 @@ def normalize_rewrite(data: dict[str, Any]) -> str | None:
     return _text(_pick(data, "reescrita_sugerida", "reescrita", "rewrite", "sugestao"))
 
 
+def normalize_split_criteria(data: dict[str, Any], total: int) -> list[list[dict[str, str]]]:
+    """Critérios por história resultante da divisão (H1…Hn); sem id, vai para a primeira ainda sem critérios."""
+    result: list[list[dict[str, str]]] = [[] for _ in range(total)]
+    for item in _as_list(_pick(data, "historias", "stories", default=[])):
+        if not isinstance(item, dict):
+            continue
+        match = re.fullmatch(r"H(\d+)", str(_pick(item, "id", "historia", default="")).strip(), re.IGNORECASE)
+        index = int(match.group(1)) - 1 if match else next((i for i, c in enumerate(result) if not c), -1)
+        if 0 <= index < total and not result[index]:
+            result[index] = _criteria(_pick(item, "criterios_aceitacao", "acceptance_criteria", "criterios"))
+    return result
+
+
 def normalize_set_analysis(data: dict[str, Any], keys: list[str]) -> dict[str, dict[str, str]]:
     block = _criteria_block(data, "analise_transversal_conjunto", "analise_conjunto", "set_analysis")
     result = {}

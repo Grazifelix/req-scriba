@@ -12,8 +12,8 @@ from app.db.unit_of_work import UnitOfWork
 from app.domain.enums import StoryStatus
 from app.schemas.common import ERROR_RESPONSES
 from app.schemas.stories import (
-    EvidenceList, GenerationRequest, StoryCreate, StoryList, StoryOut, StoryUpdate, TraceabilityOut,
-    VersionList, VersionOut,
+    EvidenceList, GenerationRequest, RewriteApply, RewriteResult, StoryCreate, StoryList, StoryOut, StoryUpdate,
+    TraceabilityOut, VersionList, VersionOut,
 )
 from app.schemas.workflow import JobOut
 from app.services.generation import start_generation
@@ -68,6 +68,17 @@ def get_story(historia_id: int, service: StoryService = Depends(_service)):
 def update_story(historia_id: int, body: StoryUpdate, service: StoryService = Depends(_service),
                  actor: str = Depends(get_actor)):
     return service.update(historia_id, body.model_dump(exclude_unset=True), actor)
+
+
+@router.post("/historias/{historia_id}/aplicar-reescrita", response_model=RewriteResult,
+             summary="Aplicar a reescrita sugerida pela avaliação",
+             description="Cria uma nova versão manual da história. Se a reescrita dividir a história "
+                         "('H1: …; H2: …'), a primeira parte substitui a atual e cada parte seguinte vira uma "
+                         "história nova, em revisão, com as mesmas evidências da original. Na divisão, o LLM "
+                         "escreve critérios de aceitação próprios para cada parte (falha do LLM → 502, nada é gravado).")
+def apply_rewrite(historia_id: int, body: RewriteApply, uow: UnitOfWork = Depends(get_uow),
+                  container: Container = Depends(get_container), actor: str = Depends(get_actor)):
+    return StoryService(uow, container).apply_rewrite(historia_id, body.historia, actor)
 
 
 @router.post("/historias/{historia_id}/aprovar", response_model=StoryOut, summary="Aprovar história (US-06 CA02)")

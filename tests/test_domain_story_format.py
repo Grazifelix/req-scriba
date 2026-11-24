@@ -43,3 +43,18 @@ def test_roundtrip_build_parse():
 def test_missing_info_entries_describe_absence():
     entries = sf.missing_info_entries(["beneficio"])
     assert entries[0]["elemento"] == "beneficio" and "não foi mencionado" in entries[0]["descricao"]
+
+
+def test_split_story_texts_separates_marked_stories():
+    text = "H1: Como professor, quero lançar notas, para avaliar; H2: Como aluno, quero ver notas, para acompanhar."
+    assert sf.split_story_texts(text) == [
+        "Como professor, quero lançar notas, para avaliar",
+        "Como aluno, quero ver notas, para acompanhar.",
+    ]
+    assert len(sf.split_story_texts("H1: Como a, quero b, para c H2: Como d, quero e, para f h3: Como g, quero h")) == 3
+
+
+def test_split_story_texts_without_markers_returns_single_text():
+    assert sf.split_story_texts("  Como gestor, quero exportar, para analisar.  ") == [
+        "Como gestor, quero exportar, para analisar."
+    ]

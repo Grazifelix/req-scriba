@@ -2,7 +2,7 @@
 
 import pytest
 
-from app.core.errors import BusinessValidationError, NotFoundError
+from app.core.errors import BusinessValidationError, ExternalServiceError, NotFoundError
 from app.domain.enums import StoryStatus
 from app.services.generation import run_generation, start_generation
 from app.services.projects import ProjectService
@@ -141,6 +141,73 @@ def test_update_with_story_text_and_no_change_keeps_version(container, project_i
             service.update(story["id"], {"historia": "texto livre"}, "ana")
     assert updated["perfil"] == "professor" and updated["versao_atual"] == 2
     assert unchanged["versao_atual"] == 2  # nada mudou → nenhuma versão nova
+
+
+def test_apply_rewrite_splits_story_and_copies_evidence(container, project_id, audio_id):
+    job = generate(container, project_id, [audio_id])
+    story_id = job["resultado"]["historias_criadas"][0]
+    rewrite = ("H1: Como coordenador pedagógico, quero emitir o boletim da turma, para acompanhar o desempenho; "
+               "H2: Como coordenador pedagógico, quero exportar o boletim em PDF, para enviar aos pais")
+    with container.uow() as uow:
+        result = StoryService(uow, container).apply_rewrite(story_id, rewrite, "ana")
+    original, [created] = result["historia"], result["historias_criadas"]
+    # critérios próprios de cada parte, escritos pelo LLM com as evidências da original
+    assert [c["id"] for c in created["criterios_aceitacao"]] == ["CA01", "CA02", "CA03"]
+    assert "exportar o boletim em PDF" in created["criterios_aceitacao"][0]["criterio"]
+    assert "emitir o boletim da turma" in original["criterios_aceitacao"][0]["criterio"]
+    [prompt] = container.llm.prompts_for("CRITERIOS_DIVISAO")
+    assert "boletim" in prompt.split("EVIDÊNCIAS:")[1]
+    assert original["versao_atual"] == 2 and original["funcionalidade"] == "emitir o boletim da turma"
+    assert original["beneficio"] == "acompanhar o desempenho"
+    assert created["funcionalidade"] == "exportar o boletim em PDF" and created["versao_atual"] == 1
+    assert created["origem"] == "manual" and created["status"] == "em_revisao"
+    assert created["codigo"] == "US-003"
+    assert [e["trecho"] for e in created["fontes_audio"]] == [e["trecho"] for e in original["fontes_audio"]]
+    assert created["fontes_audio"][0]["origem"] == original["fontes_audio"][0]["origem"]
+
+
+def test_apply_rewrite_without_criteria_keeps_original_and_flags_new_story(container, project_id):
+    container.llm.handlers["CRITERIOS_DIVISAO"] = lambda prompt: {"historias": []}
+    with container.uow() as uow:
+        story = StoryService(uow).create_manual(project_id, {
+            "funcionalidade": "lançar notas", "criterios_aceitacao": [{"criterio": "Dado x, quando y, então z."}],
+        }, "ana")
+    rewrite = "H1: Como professor, quero lançar notas, para avaliar; H2: Como professor, quero corrigir notas, para ajustar"
+    with container.uow() as uow:
+        result = StoryService(uow, container).apply_rewrite(story["id"], rewrite, "ana")
+    [created] = result["historias_criadas"]
+    assert result["historia"]["criterios_aceitacao"][0]["criterio"] == "Dado x, quando y, então z."
+    assert created["criterios_aceitacao"] == []
+    assert "criterios_aceitacao" in {e["elemento"] for e in created["informacoes_ausentes"]}
+
+
+def test_apply_rewrite_llm_failure_saves_nothing(container, project_id):
+    with container.uow() as uow:
+        story = StoryService(uow).create_manual(project_id, {"funcionalidade": "lançar notas"}, "ana")
+    container.llm.fail = True
+    rewrite = "H1: Como professor, quero lançar notas, para avaliar; H2: Como professor, quero corrigir notas, para ajustar"
+    with pytest.raises(ExternalServiceError):
+        with container.uow() as uow:
+            StoryService(uow, container).apply_rewrite(story["id"], rewrite, "ana")
+    with container.uow() as uow:
+        assert len(uow.stories.list_by_project(project_id)) == 1
+        assert StoryService(uow).detail(story["id"])["versao_atual"] == 1
+
+
+def test_apply_rewrite_with_single_story_and_invalid_part(container, project_id):
+    with container.uow() as uow:
+        story = StoryService(uow).create_manual(project_id, {"funcionalidade": "lançar notas"}, "ana")
+    with container.uow() as uow:
+        result = StoryService(uow).apply_rewrite(
+            story["id"], "Como professor, quero lançar notas, para informar os alunos.", "ana"
+        )
+    assert result["historias_criadas"] == [] and result["historia"]["versao_atual"] == 2
+    with pytest.raises(BusinessValidationError, match="padrão"):
+        with container.uow() as uow:
+            StoryService(uow, container).apply_rewrite(story["id"], "H1: Como a, quero b, para c; H2: texto livre", "ana")
+    with container.uow() as uow:
+        assert len(uow.stories.list_by_project(project_id)) == 1  # nada criado nem alterado
+        assert StoryService(uow).detail(story["id"])["versao_atual"] == 2
 
 
 def test_versions_record_author_date_and_ai_origin(container, project_id, audio_id):

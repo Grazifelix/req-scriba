@@ -10,7 +10,7 @@ from typing import Any
 
 from app.domain import qus
 
-PROMPT_VERSION = "3.3"
+PROMPT_VERSION = "3.4"
 
 SYSTEM = (
     "Você é um engenheiro de requisitos sênior, especialista em Histórias de Usuário e no framework "
@@ -468,6 +468,38 @@ DEFEITOS:
 {defect_lines}
 
 EVIDÊNCIAS ATUAIS:
+{evidence}
+"""
+
+
+def split_criteria_prompt(
+    story: dict[str, Any], parts: list[str], evidence_blocks: list[dict[str, Any]]
+) -> str:
+    """Divisão aplicada pelo analista: critérios de aceitação próprios para cada história resultante."""
+    stories = "\n".join(f"- H{i}: {text}" for i, text in enumerate(parts, start=1))
+    evidence = format_sources(evidence_blocks) if evidence_blocks else "(nenhuma evidência registrada)"
+    return f"""### TAREFA: CRITERIOS_DIVISAO
+A HISTÓRIA ORIGINAL foi dividida nas HISTÓRIAS RESULTANTES. Escreva os critérios de aceitação de CADA uma.
+Regras:
+1. Cada critério vale para uma única história resultante: só o comportamento da funcionalidade dela.
+2. Reaproveite os critérios da história original que se aplicam (copie o texto; ajuste só o necessário) e
+   não repita o mesmo critério em duas histórias.
+3. Crie critérios novos somente com regras e comportamentos que façam sentido para a história e/ou estejam
+   nas EVIDÊNCIAS. Nunca invente regras de negócio.
+4. No mínimo 3 critérios diferentes por história, sempre no formato "Dado …, quando …, então …".
+   Se não houver base para 3, escreva os que houver.
+5. "titulo": título curto do critério (até 6 palavras).
+
+Formato: {{"historias": [{{"id": "H1", "criterios_aceitacao": [{{"titulo": "string",
+"criterio": "Dado …, quando …, então …"}}]}}]}}
+
+HISTÓRIA ORIGINAL:
+{_story_block(story)}
+
+HISTÓRIAS RESULTANTES:
+{stories}
+
+EVIDÊNCIAS:
 {evidence}
 """
 

@@ -39,7 +39,8 @@ def add_evidences(uow: UnitOfWork, story_id: int, specs: list[dict], origin: str
         ids.append(uow.evidences.insert({
             "historia_id": story_id, "tipo_fonte": spec["tipo_fonte"], "fonte_id": spec["fonte_id"],
             "nome_arquivo": spec["nome_arquivo"], "trecho_id": spec.get("trecho_id"), "trecho": spec["trecho"],
-            "localizacao": spec["localizacao"], "afirmacao": spec.get("afirmacao"), "origem": origin,
+            "localizacao": spec["localizacao"], "afirmacao": spec.get("afirmacao"),
+            "origem": spec.get("origem") or origin,  # cópia de outra história mantém a origem
             "criado_em": now,
         }))
         if spec.get("trecho_id"):

@@ -69,6 +69,16 @@ def default_impact(prompt: str) -> dict[str, Any]:
     return {"relacao": "sem_relacao", "justificativa": "", "fontes": []}
 
 
+def default_split_criteria(prompt: str) -> dict[str, Any]:
+    parts = re.findall(r"^- (H\d+): .*?quero (.+?),", prompt, flags=re.M)
+    return {"historias": [
+        {"id": h, "criterios_aceitacao": [
+            {"titulo": f"Regra {n}", "criterio": f"Dado o perfil, quando {action}, então ocorre o resultado {n}."}
+            for n in (1, 2, 3)
+        ]} for h, action in parts
+    ]}
+
+
 def default_context(prompt: str) -> dict[str, Any]:
     return {"perfis": [], "objetivos": [], "termos": []}  # neutro: não altera prompts nem orçamento dos lotes
 
@@ -88,6 +98,7 @@ class FakeLLM:
             "AVALIACAO_QUS_CONJUNTO": default_set,
             "PERGUNTAS_FOLLOWUP": default_questions,
             "ANALISE_IMPACTO": default_impact,
+            "CRITERIOS_DIVISAO": default_split_criteria,
         }
         self.calls: list[tuple[str, str]] = []
         self.fail = False

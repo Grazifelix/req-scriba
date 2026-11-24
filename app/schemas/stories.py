@@ -39,6 +39,14 @@ class StoryUpdate(InputModel):
     criterios_aceitacao: Optional[list[AcceptanceCriterionIn]] = Field(default=None, max_length=15)
 
 
+class RewriteApply(InputModel):
+    historia: LongText = Field(
+        description="Reescrita sugerida pela avaliação. Para dividir a história, use 'H1: Como …; H2: Como …'.",
+        examples=["H1: Como professor, quero lançar notas, para registrar o desempenho; "
+                  "H2: Como professor, quero corrigir notas, para manter o boletim correto"],
+    )
+
+
 class GenerationRequest(InputModel):
     audio_ids: list[int] = Field(default_factory=list, max_length=100)
     documento_ids: list[int] = Field(default_factory=list, max_length=100)
@@ -133,3 +141,8 @@ class VersionList(OutputModel):
     historia_id: int
     itens: list[VersionOut]
     total: int
+
+
+class RewriteResult(OutputModel):
+    historia: StoryOut = Field(description="A história atual, com o texto da primeira parte.")
+    historias_criadas: list[StoryOut] = Field(description="Histórias novas, uma para cada parte além da primeira.")

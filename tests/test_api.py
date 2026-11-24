@@ -291,3 +291,17 @@ def test_openapi_documents_all_routes(client):
     for path, operations in spec["paths"].items():
         for operation in operations.values():
             assert operation.get("summary"), f"{path} sem summary"
+
+
+def test_apply_rewrite_route_creates_split_stories(client):
+    project_id = create_project(client)
+    story = client.post(f"{API}/projetos/{project_id}/historias", json={"funcionalidade": "lançar notas"}).json()
+    rewrite = "H1: Como professor, quero lançar notas, para avaliar; H2: Como professor, quero corrigir notas, para ajustar"
+    response = client.post(f"{API}/historias/{story['id']}/aplicar-reescrita", json={"historia": rewrite})
+    assert response.status_code == 200
+    body = response.json()
+    assert body["historia"]["funcionalidade"] == "lançar notas"
+    assert [s["codigo"] for s in body["historias_criadas"]] == ["US-002"]
+    assert len(body["historias_criadas"][0]["criterios_aceitacao"]) == 3
+    assert_error(client.post(f"{API}/historias/{story['id']}/aplicar-reescrita", json={"historia": "livre"}),
+                 422, "validacao")

@@ -165,3 +165,15 @@ def test_normalize_consolidation_discards_invalid_operations():
     assert ops["fundir"] == [{"historias": ["C2", "C3"]}]  # C9 inexistente deixa o grupo com 1 só
     assert ops["preencher"] == [{"alvo": "C1", "campo": "beneficio", "de": "C2"}]
     assert ops["contradicoes"][0]["historias"] == ["C1", "C3"] and ops["contradicoes"][0]["descricao"]
+
+
+def test_normalize_split_criteria_by_id_or_position():
+    data = {"historias": [
+        {"id": "H2", "criterios_aceitacao": [{"titulo": "A", "criterio": "Dado a, quando b, então c."}]},
+        {"criterios_aceitacao": ["Dado x, quando y, então z."]},
+        {"id": "H9", "criterios_aceitacao": ["fora do intervalo"]},
+    ]}
+    first, second = parsing.normalize_split_criteria(data, 2)
+    assert second == [{"titulo": "A", "criterio": "Dado a, quando b, então c."}]
+    assert first == [{"titulo": "Critério 1", "criterio": "Dado x, quando y, então z."}]
+    assert parsing.normalize_split_criteria({}, 2) == [[], []]
