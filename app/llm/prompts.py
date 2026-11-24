@@ -10,7 +10,7 @@ from typing import Any
 
 from app.domain import qus
 
-PROMPT_VERSION = "3.4"
+PROMPT_VERSION = "3.5"
 
 SYSTEM = (
     "Você é um engenheiro de requisitos sênior, especialista em Histórias de Usuário e no framework "
@@ -425,8 +425,12 @@ Só depois de concluir a Etapa 1, reescreva a HISTÓRIA ALVO de modo a resolver 
 lista PROBLEMAS JÁ ENCONTRADOS e os que você apontou na Etapa 1 ("Atenção" ou "Não atende").
 - Use o formato "Como <perfil>, quero <funcionalidade>, para <benefício>".
 - Detalhes, telas, regras e ordem de implementação saem do texto da história.
-- Se for preciso dividir a história (atômica, estimável ou conceitualmente sólida), escreva todas em
+- Reescreva só a HISTÓRIA ALVO. Se for preciso dividi-la (atômica, estimável ou conceitualmente sólida),
+  cada parte vem do conteúdo que já está nela: não acrescente funcionalidades novas. Escreva as partes em
   sequência, como "H1: Como ...; H2: Como ...".
+- Nunca repita nem reformule histórias de DEMAIS HISTÓRIAS DO BACKLOG.
+- Lacunas do critério complete (histórias que faltam no backlog) não se resolvem na reescrita: ficam só na
+  observação da Etapa 1.
 - Não inclua códigos de história (ex.: US-001) no texto.
 - Se não houver nenhum problema a resolver, devolva "".
 

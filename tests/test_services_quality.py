@@ -7,7 +7,7 @@ from app.domain import qus
 from app.domain.enums import StoryStatus
 from app.services.quality import QualityService, run_batch_evaluation, start_batch_evaluation
 from app.services.stories import StoryService
-from tests.fakes import default_individual
+from tests.fakes import default_individual, default_set
 
 
 def create(container, project_id, **data):
@@ -51,7 +51,75 @@ def test_rewrite_comes_last_with_all_problems(container, project_id):
     assert "[unambiguous] Atenção: Termo 'boletim' vago." in problems
     assert "[lacuna] formato" in problems and "[atomic]" not in problems
     assert "reescrita_sugerida" not in container.llm.prompts_for("AVALIACAO_QUS_INDIVIDUAL")[0]
+    assert "Nunca repita nem reformule histórias de DEMAIS HISTÓRIAS DO BACKLOG" in set_prompt
     assert result["reescrita_sugerida"].startswith("Como coordenador")
+
+
+OTHER = {"perfil": "professor", "funcionalidade": "lançar as notas da turma", "beneficio": "registrar o desempenho"}
+OTHER_TEXT = "Como professor, quero lançar as notas da turma, para registrar o desempenho."
+TARGET_TEXT = "Como coordenador pedagógico, quero emitir o boletim da turma, para acompanhar o desempenho dos alunos."
+
+
+def rewrite_with(container, rewrite):
+    def handler(prompt):
+        return {**default_set(prompt), "reescrita_sugerida": rewrite}
+    container.llm.handlers["AVALIACAO_QUS_CONJUNTO"] = handler
+
+
+def test_rewrite_drops_parts_copied_from_backlog(container, project_id):
+    story_id = create(container, project_id, **FULL)
+    create(container, project_id, **OTHER)
+    improved = "Como coordenador pedagógico, quero emitir o boletim da turma em PDF, para acompanhar o desempenho"
+    rewrite_with(container, f"H1: {improved}; H2: {OTHER_TEXT}")
+    result = evaluate(container, story_id)
+    assert result["reescrita_sugerida"] == improved  # sem a cópia e sem o prefixo "H1:"
+    with container.uow() as uow:
+        assert StoryService(uow).detail(story_id)["sugestao_scriba"] == improved
+
+
+def test_rewrite_renumbers_remaining_parts(container, project_id):
+    story_id = create(container, project_id, **FULL)
+    create(container, project_id, **OTHER)
+    first = "Como coordenador pedagógico, quero emitir o boletim da turma, para acompanhar o desempenho."
+    second = "Como coordenador pedagógico, quero enviar o boletim às famílias, para mantê-las informadas."
+    rewrite_with(container, f"H1: {first} H2: {OTHER_TEXT} H3: {second}")
+    assert evaluate(container, story_id)["reescrita_sugerida"] == (
+        f"H1: {first.rstrip('.')}; H2: {second.rstrip('.')}")
+
+
+def test_rewrite_keeps_legitimate_split(container, project_id):
+    story_id = create(container, project_id, **FULL)
+    create(container, project_id, **OTHER)
+    split = ("H1: Como coordenador pedagógico, quero emitir o boletim da turma, para acompanhar o desempenho; "
+             "H2: Como coordenador pedagógico, quero enviar o boletim às famílias, para mantê-las informadas")
+    rewrite_with(container, split)
+    assert evaluate(container, story_id)["reescrita_sugerida"] == split
+
+
+def test_rewrite_with_only_copies_is_discarded_and_clears_old_suggestion(container, project_id):
+    story_id = create(container, project_id, **FULL)
+    create(container, project_id, **OTHER)
+    assert evaluate(container, story_id)["reescrita_sugerida"]  # sugestão anterior gravada
+    rewrite_with(container, f"H1: {TARGET_TEXT}; H2: {OTHER_TEXT}")  # a HU atual sem mudança + uma cópia
+    result = evaluate(container, story_id)
+    assert result["reescrita_sugerida"] is None
+    with container.uow() as uow:
+        assert StoryService(uow).detail(story_id)["sugestao_scriba"] is None  # a antiga não fica na tela
+
+
+def test_rewrite_with_punctuation_fix_is_kept(container, project_id):
+    story_id = create(container, project_id, **FULL)
+    fixed = TARGET_TEXT.replace("turma, para", "turma para")
+    rewrite_with(container, fixed)
+    assert evaluate(container, story_id)["reescrita_sugerida"] == fixed
+
+
+def test_rewrite_part_similar_to_target_is_kept(container, project_id):
+    story_id = create(container, project_id, **FULL)
+    create(container, project_id, **{**FULL, "funcionalidade": "emitir o boletim da turma em PDF"})  # vizinha
+    reworded = "Como coordenador pedagógico, quero emitir o boletim da turma, para acompanhar o desempenho de cada aluno"
+    rewrite_with(container, reworded)
+    assert evaluate(container, story_id)["reescrita_sugerida"] == reworded
 
 
 def test_deterministic_rules_override_llm(container, project_id):

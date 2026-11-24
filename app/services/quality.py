@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 
 from app.core.container import Container
 from app.core.errors import AppError, BusinessValidationError, ConflictError, NotFoundError
@@ -54,6 +55,41 @@ def _deterministic_set(story: dict, others: list[dict]) -> dict:
         result["conflict_free"] = {"resultado": qus.MEETS, "observacao": alone}
         result["independent"] = {"resultado": qus.MEETS, "observacao": alone}
     return result
+
+
+def _same_text(a: str, b: str) -> bool:
+    """Igualdade ignorando só espaços e o ponto final: correções de pontuação contam como mudança."""
+    def clean(text: str) -> str:
+        return re.sub(r"\s+", " ", text).strip().rstrip(".").strip()
+    return clean(a) == clean(b)
+
+
+def _drop_backlog_copies(rewrite: str | None, story: dict, others: list[dict]) -> str | None:
+    """Remove da reescrita as partes que copiam outra HU do backlog (aplicá-las criaria duplicatas).
+
+    Uma parte sai quando é ≥ UNIQUE_THRESHOLD parecida com outra HU e mais parecida com ela do que com a
+    própria alvo. Se não sobra nada, ou só a HU atual sem mudança, devolve None.
+    """
+    if not rewrite:
+        return None
+    kept, dropped = [], []
+    for part in story_format.split_story_texts(rewrite):
+        closest = max(others, key=lambda o: similarity(o["historia"], part), default=None)
+        score = similarity(closest["historia"], part) if closest else 0.0
+        if score >= UNIQUE_THRESHOLD and score > similarity(story["historia"], part):
+            dropped.append(closest["codigo"])
+        else:
+            kept.append(part)
+    if dropped:
+        logger.info("Reescrita de %s: %d parte(s) descartada(s) por copiar %s",
+                    story["codigo"], len(dropped), ", ".join(dropped))
+    if not kept or (len(kept) == 1 and _same_text(kept[0], story["historia"])):
+        return None
+    if not dropped:
+        return rewrite  # nada descartado: mantém o texto do modelo como veio
+    if len(kept) == 1:
+        return kept[0]
+    return "; ".join(f"H{i}: {part.rstrip('. ')}" for i, part in enumerate(kept, start=1))
 
 
 def evaluation_defects(evaluation: dict | None) -> list[dict]:
@@ -124,7 +160,7 @@ class QualityService:
             prompt = prompts.set_evaluation_prompt(story, context, llm_keys, problems, gaps)
             raw = llm.generate_json(prompts.SYSTEM, prompt)
             set_result.update(parsing.normalize_set_analysis(raw, llm_keys))
-            rewrite = parsing.normalize_rewrite(raw)
+            rewrite = _drop_backlog_copies(parsing.normalize_rewrite(raw), story, others)
         set_result = {k: set_result[k] for k in qus.SET_CRITERIA}
 
         met = qus.count_met(individual["avaliacao_criterios"], set_result)
@@ -139,7 +175,7 @@ class QualityService:
         self.uow.stories.update(story_id, {
             "qualidade_porcentagem": score, "qualidade_status": qus.quality_label(score),
             "qualidade_avaliacao_id": evaluation_id,
-            "sugestao_scriba": rewrite or story["sugestao_scriba"],
+            "sugestao_scriba": rewrite,  # sempre a da última avaliação; nunca uma sugestão antiga
         })
         return presenters.evaluation(self.uow.evaluations.get(evaluation_id))
 
