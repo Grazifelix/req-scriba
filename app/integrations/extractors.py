@@ -3,12 +3,16 @@
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
 from app.core.errors import BusinessValidationError
 
 logger = logging.getLogger(__name__)
+
+_SPACES = re.compile(r"[ \t ]+")
+_BLANK_LINES = re.compile(r"\n{3,}")
 
 
 @dataclass
@@ -35,9 +39,26 @@ def _extract_pdf(path: Path) -> list[ExtractedPage]:
         reader = PdfReader(str(path))
         if reader.is_encrypted:
             raise BusinessValidationError("O PDF está protegido por senha e não pode ser lido.")
-        return [ExtractedPage(i + 1, page.extract_text() or "") for i, page in enumerate(reader.pages)]
+        return [ExtractedPage(i + 1, _page_text(page)) for i, page in enumerate(reader.pages)]
     except PdfReadError as exc:
         raise BusinessValidationError(f"PDF inválido ou corrompido: {exc}") from exc
+
+
+def _page_text(page) -> str:
+    """Usa o modo layout do pypdf: o modo padrão quebra cada palavra em uma linha em PDFs
+    exportados por editores como o Google Docs. Volta ao modo padrão se o layout falhar."""
+    try:
+        text = page.extract_text(extraction_mode="layout")
+    except Exception:  # o modo layout é mais frágil em PDFs malformados
+        logger.warning("Extração em modo layout falhou; usando o modo padrão", exc_info=True)
+        text = page.extract_text()
+    return normalize_whitespace(text or "")
+
+
+def normalize_whitespace(text: str) -> str:
+    """Remove espaços de alinhamento e colapsa linhas em branco repetidas (máx. uma)."""
+    lines = (_SPACES.sub(" ", line).strip() for line in text.splitlines())
+    return _BLANK_LINES.sub("\n\n", "\n".join(lines)).strip()
 
 
 def _extract_docx(path: Path) -> list[ExtractedPage]:

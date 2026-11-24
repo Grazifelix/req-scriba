@@ -8,7 +8,7 @@ from app.core.config import Settings
 from app.core.container import build_embedder, build_llm, embedding_fingerprint
 from app.core.errors import BusinessValidationError, ExternalServiceError
 from app.integrations.embeddings import HashEmbedder
-from app.integrations.extractors import extract_pages
+from app.integrations.extractors import extract_pages, normalize_whitespace
 from app.integrations.ollama import OllamaClient
 from app.integrations.openai_compatible import OpenAICompatibleClient
 from app.integrations.storage import AUDIO_EXTENSIONS, DOCUMENT_EXTENSIONS, FileStorage, sanitize_filename
@@ -295,6 +295,11 @@ def test_extract_pdf_without_text_is_rejected(tmp_path: Path):
         writer.write(fh)
     with pytest.raises(BusinessValidationError, match="não possui texto extraível"):
         extract_pages(path)
+
+
+def test_normalize_whitespace_removes_layout_padding():
+    raw = "  Título    do   documento  \n\n\n\n\nLinha  com   espaços\t\n   \nFim  "
+    assert normalize_whitespace(raw) == "Título do documento\n\nLinha com espaços\n\nFim"
 
 
 def test_extract_corrupted_docx(tmp_path: Path):
