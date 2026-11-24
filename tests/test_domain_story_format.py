@@ -1,6 +1,21 @@
 from app.domain import story_format as sf
 
 
+def test_split_story_texts_without_markers_splits_on_new_como_quero():
+    text = ("Como cliente, quero receber sugestões de produtos extras ao realizar pedidos, para aumentar o mix de "
+            "produtos por meio de upselling de aperitivos; Como cliente, quero receber cupons ao realizar pedidos, "
+            "para aproveitar promoções de entradas.")
+    first, second = sf.split_story_texts(text)
+    assert first.endswith("upselling de aperitivos") and second.startswith("Como cliente, quero receber cupons")
+    assert sf.parse_story_text(first)["beneficio"] == "aumentar o mix de produtos por meio de upselling de aperitivos"
+    assert len(sf.split_story_texts("Como a, quero b, para c.\nComo d, eu quero e, para f.")) == 2
+
+
+def test_split_story_texts_keeps_como_that_is_not_a_new_story():
+    text = "Como gestor, quero exportar relatórios, para analisar custos. Como resultado, reduzo gastos."
+    assert sf.split_story_texts(text) == [text]
+
+
 def test_build_full_story():
     assert sf.build_story_text("gestor", "exportar relatórios", "analisar custos") == (
         "Como gestor, quero exportar relatórios, para analisar custos."

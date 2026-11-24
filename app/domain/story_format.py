@@ -67,11 +67,17 @@ def parse_story_text(text: str) -> dict[str, str | None] | None:
     return None
 
 
-_SPLIT_MARKER_RE = re.compile(r"\bH\d+\s*:\s*", re.IGNORECASE)
+# Início de outra história: marcador "H2:" ou, após ";", "." ou quebra de linha, um novo "Como <perfil>, quero".
+_SPLIT_MARKER_RE = re.compile(
+    r"\bH\d+\s*:\s*"
+    r"|(?:(?<=[;.])\s+|\s*\n\s*)(?=como\s[^,;.]+,\s*(?:eu\s+)?(?:quero|gostaria|preciso|desejo)\b)",
+    re.IGNORECASE,
+)
 
 
 def split_story_texts(text: str) -> list[str]:
-    """Separa uma reescrita "H1: Como …; H2: Como …" em textos de histórias. Sem marcadores: [texto]."""
+    """Separa uma reescrita com várias histórias ("H1: Como …; H2: Como …" ou "Como …; Como …").
+    Texto com uma só história: [texto]."""
     parts = [p.strip().rstrip(";").strip() for p in _SPLIT_MARKER_RE.split(text or "")]
     parts = [p for p in parts if p]
     return parts or [(text or "").strip()]
