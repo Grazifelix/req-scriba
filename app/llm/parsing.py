@@ -208,7 +208,16 @@ def normalize_analysis(data: Any, valid_labels: set[str]) -> dict[str, Any]:
             item = _analysis_item(kind, raw, valid_labels)
             if item:
                 items.append(item)
-    return {"sistema": _text(_pick(data, "sistema", "system", "produto", "solucao"), 500), "itens": items}
+    return {"sistema": _paragraphs(_pick(data, "sistema", "system", "produto", "solucao"), 2000), "itens": items}
+
+
+def _paragraphs(value: Any, limit: int) -> str | None:
+    """Como _text, mas preserva a separação entre parágrafos (linha em branco)."""
+    text = _text(value, limit) if isinstance(value, (list, dict)) else None
+    if text is not None or value is None:
+        return text
+    parts = [re.sub(r"\s+", " ", p).strip() for p in re.split(r"\n\s*\n", str(value))]
+    return "\n\n".join(p for p in parts if p)[:limit] or None
 
 
 def normalize_analysis_result(data: dict[str, Any], valid_labels: set[str]) -> dict[str, Any]:

@@ -10,7 +10,7 @@ from typing import Any
 
 from app.domain import qus
 
-PROMPT_VERSION = "3.5"
+PROMPT_VERSION = "3.6"
 
 SYSTEM = (
     "Você é um engenheiro de requisitos sênior, especialista em Histórias de Usuário e no framework "
@@ -37,7 +37,10 @@ CONTEXTO GERAL DAS FONTES (resumo das fontes completas; itens citáveis pelo ró
 
 ANALYSIS_STEPS = """## ETAPA 1: Entender as fontes (campo "analise")
 
-1. "sistema": em uma parágrafo, qual sistema, produto ou solução está sendo discutido.
+1. "sistema": descrição do sistema em até dois parágrafos (separados por uma linha em branco) que
+   sintetizem: o que é o sistema, produto ou solução; que problema ele visa resolver; para quem ele é
+   (usuários e clientes); e por que ele é importante. Use somente o que as fontes sustentam; se algum
+   desses pontos não aparecer nas fontes, omita-o em vez de inventá-lo.
 2. "participantes": as pessoas que falam na reunião e o papel delas NA REUNIÃO (ex.: "Dina: gerente de
    projeto"). Participantes NÃO são perfis de história, a menos que também usem o sistema; nesse caso,
    use o papel de usuário, nunca o nome da pessoa.

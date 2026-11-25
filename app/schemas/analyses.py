@@ -6,7 +6,7 @@ from typing import Any, Literal, Optional
 
 from pydantic import Field
 
-from app.schemas.common import InputModel, OutputModel, ShortText
+from app.schemas.common import InputModel, LongText, OutputModel, ShortText
 
 ItemType = Literal["participante", "usuario", "requisito_negocio", "funcionalidade", "fora_de_escopo"]
 
@@ -33,13 +33,13 @@ class AnalysisItemUpdate(InputModel):
 
 
 class AnalysisCreate(InputModel):
-    sistema: Optional[ShortText] = Field(default=None, examples=["Pedidos por tablet na mesa do restaurante"])
+    sistema: Optional[LongText] = Field(default=None, examples=["Pedidos por tablet na mesa do restaurante"])
     revisada: bool = False
     itens: list[AnalysisItemCreate] = Field(default_factory=list, max_length=200)
 
 
 class AnalysisUpdate(InputModel):
-    sistema: Optional[ShortText] = None
+    sistema: Optional[LongText] = None
     revisada: Optional[bool] = Field(
         default=None, description="True: a análise passa a ser usada como contexto confirmado nas próximas gerações",
     )
