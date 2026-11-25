@@ -155,13 +155,14 @@ def evaluation(ev: dict) -> dict:
     }
 
 
-def story_summary(s: dict) -> dict:
+def story_summary(s: dict, rewrite: str | None = None) -> dict:
     return {
         "id": s["id"], "projeto_id": s["projeto_id"], "codigo": s["codigo"], "titulo": s["titulo"],
         "historia": s["historia"], "status": s["status"], "status_rotulo": label_of(StoryStatus, s["status"]),
         "validada": s["status"] == StoryStatus.APPROVED.value,
         "qualidade_geral": quality_summary(s["qualidade_porcentagem"], None),
         "possui_informacoes_ausentes": bool(s["informacoes_ausentes"]),
+        "reescrita_sugerida": rewrite,
         "versao_atual": s["versao_atual"], "origem": s["origem"], "atualizado_em": s["atualizado_em"],
     }
 
@@ -183,7 +184,7 @@ def story(s: dict, evidences: list[dict], versions: list[dict], latest_eval: dic
             "lacunas": latest_eval["lacunas"], "reescrita_sugerida": latest_eval["reescrita_sugerida"],
         }
     return {
-        **story_summary(s),
+        **story_summary(s, latest_eval["reescrita_sugerida"] if latest_eval else None),
         "perfil": s["perfil"], "funcionalidade": s["funcionalidade"], "beneficio": s["beneficio"],
         "qualidade_geral": quality, "criterios_aceitacao": s["criterios_aceitacao"],
         "fontes_audio": audio_sources, "fontes_documentos": document_sources,

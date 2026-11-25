@@ -72,6 +72,9 @@ class StorySummaryOut(OutputModel):
     status_rotulo: str
     validada: bool = Field(description="True apenas para histórias aprovadas por um humano")
     qualidade_geral: Optional[QualitySummary]
+    reescrita_sugerida: Optional[str] = Field(
+        default=None, description="Reescrita sugerida pela avaliação de qualidade mais recente, se houver"
+    )
     versao_atual: int
     origem: str
 

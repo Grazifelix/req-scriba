@@ -143,7 +143,8 @@ class StoryService:
     def list(self, project_id: int, status: str | None = None) -> dict:
         require_project(self.uow, project_id)
         stories = self.uow.stories.list_by_project(project_id, status)
-        return presenters.listing([presenters.story_summary(s) for s in stories])
+        rewrites = self.uow.evaluations.latest_rewrites(project_id)
+        return presenters.listing([presenters.story_summary(s, rewrites.get(s["id"])) for s in stories])
 
     def create_manual(self, project_id: int, data: dict, author: str) -> dict:
         require_project(self.uow, project_id)

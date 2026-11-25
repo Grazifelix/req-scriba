@@ -514,7 +514,7 @@ Cabeçalho opcional `X-Usuario` (responsável pelas alterações; padrão `engen
 |---|---|---|
 | POST | `/projetos/{projeto_id}/historias/gerar` | Gerar HU a partir de `audio_ids`/`documento_ids` e de uma análise aprovada (`analise_id` opcional) → `202` job; sem análise aprovada → `422` |
 | POST | `/projetos/{projeto_id}/historias` | Criar HU manualmente |
-| GET | `/projetos/{projeto_id}/historias?status=` | Listar HU |
+| GET | `/projetos/{projeto_id}/historias?status=` | Listar HU; cada item traz `reescrita_sugerida` da avaliação mais recente (o frontend marca as HU com recomendação aguardando avaliação) |
 | GET | `/historias/{historia_id}` | Detalhe completo (QUS, fontes, versões) |
 | PATCH | `/historias/{historia_id}` | Editar campos (gera nova versão) |
 | POST | `/historias/{historia_id}/aplicar-reescrita` | Aplicar a reescrita da avaliação; `H1: …; H2: …` divide a HU (a 1ª parte atualiza esta, as demais viram HU novas; cada parte recebe critérios próprios gerados pelo LLM) |

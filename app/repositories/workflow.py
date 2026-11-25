@@ -21,6 +21,17 @@ class EvaluationRepository(BaseRepository):
         ).fetchone()
         return self._decode(row)
 
+    def latest_rewrites(self, project_id: int) -> dict[int, str | None]:
+        """Reescrita sugerida da avaliação mais recente de cada história do projeto."""
+        rows = self.conn.execute(
+            "SELECT a.historia_id, a.reescrita_sugerida FROM avaliacoes_qualidade a "
+            "JOIN historias h ON h.id = a.historia_id "
+            "WHERE h.projeto_id = ? AND a.id = ("
+            "SELECT MAX(id) FROM avaliacoes_qualidade WHERE historia_id = a.historia_id)",
+            (project_id,),
+        ).fetchall()
+        return {row[0]: row[1] for row in rows}
+
 
 class QuestionRepository(BaseRepository):
     table = "perguntas_followup"

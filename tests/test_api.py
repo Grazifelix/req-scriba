@@ -212,6 +212,19 @@ def test_error_contract(client):
     assert_error(client.get(f"{API}/historias/{story['id']}/avaliacoes/comparacao"), 409, "conflito")
 
 
+def test_story_list_exposes_latest_rewrite(client):
+    project_id = create_project(client)
+    story = client.post(f"{API}/projetos/{project_id}/historias", json={"funcionalidade": "lançar notas"}).json()
+    listed = client.get(f"{API}/projetos/{project_id}/historias").json()["itens"]
+    assert listed[0]["reescrita_sugerida"] is None
+    detail = client.post(f"{API}/historias/{story['id']}/avaliar")
+    assert detail.status_code == 200
+    rewrite = client.get(f"{API}/historias/{story['id']}").json()["reescrita_sugerida"]
+    assert rewrite
+    listed = client.get(f"{API}/projetos/{project_id}/historias").json()["itens"]
+    assert listed[0]["reescrita_sugerida"] == rewrite
+
+
 def test_external_failure_returns_502(client, container):
     project_id = create_project(client)
     story = client.post(f"{API}/projetos/{project_id}/historias", json={"funcionalidade": "lançar notas"}).json()
