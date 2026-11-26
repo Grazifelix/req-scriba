@@ -16,11 +16,15 @@ class AcceptanceCriterionIn(InputModel):
 
 class CriterionSourceOut(OutputModel):
     trecho_id: int = Field(description="Id permanente do trecho da fonte (trechos_fonte.id)")
+    evidencia_id: Optional[int] = Field(default=None, description="Evidência da história que copia o trecho")
     afirmacoes_sustentadas: list[str] = Field(description="Partes do critério sustentadas: dado | quando | entao")
 
 
 class AcceptanceCriterionOut(OutputModel):
-    id: str = Field(examples=["CA01"])
+    id: str = Field(examples=["CA01"], description="Código pela posição na lista (muda se a ordem mudar)")
+    criterio_id: Optional[int] = Field(default=None, description="Id permanente do critério")
+    versao_historia: Optional[int] = Field(default=None, description="Versão da história em que o critério entrou")
+    status: Optional[str] = Field(default=None, description="vigente | substituido")
     titulo: str
     criterio: str = Field(description="Texto completo 'Dado …, quando …, então …'")
     dado: Optional[str] = Field(default=None, description="Presente nos critérios gerados pela IA")
@@ -122,6 +126,7 @@ class VersionOut(OutputModel):
     historia: Optional[str]
     conteudo: dict[str, Any]
     evidencia_ids: list[int]
+    criterio_ids: list[int] = Field(default_factory=list, description="Critérios vigentes nesta versão")
     responsavel: str
     data_hora: str
 

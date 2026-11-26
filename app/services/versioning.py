@@ -4,13 +4,23 @@ from __future__ import annotations
 
 from app.core.time import utc_now_iso
 from app.db.unit_of_work import UnitOfWork
+from app.domain.criteria import criteria_content
 from app.domain.enums import ChangeOrigin, ChangeType
+from app.services.criteria_store import current_ids
 
 CONTENT_FIELDS = ("titulo", "perfil", "funcionalidade", "beneficio", "historia", "criterios_aceitacao")
 
 
 def snapshot(story: dict) -> dict:
-    return {field: story.get(field) for field in CONTENT_FIELDS}
+    """Conteúdo da história; os critérios entram sem os metadados do armazenamento (id, status, versão)."""
+    content = {field: story.get(field) for field in CONTENT_FIELDS}
+    content["criterios_aceitacao"] = criteria_content(story.get("criterios_aceitacao"))
+    return content
+
+
+def same_content(content: dict, story: dict) -> bool:
+    """True se ``content`` (saída de ``build_content``) tem o mesmo conteúdo da história."""
+    return {**content, "criterios_aceitacao": criteria_content(content.get("criterios_aceitacao"))} == snapshot(story)
 
 
 def create_version(
@@ -22,7 +32,7 @@ def create_version(
     suggestion_id: int | None = None,
     note: str | None = None,
 ) -> int:
-    """Cria a próxima versão com o snapshot atual e as evidências vigentes. Retorna o número."""
+    """Cria a próxima versão com o snapshot atual, as evidências e os critérios vigentes. Retorna o número."""
     story = uow.stories.get(story_id)
     previous = uow.versions.list_by_story(story_id)
     number = (previous[-1]["numero"] + 1) if previous else 1
@@ -30,8 +40,8 @@ def create_version(
     uow.versions.insert({
         "historia_id": story_id, "numero": number, "tipo_alteracao": change_type.value,
         "origem_alteracao": origin.value, "conteudo": snapshot(story), "evidencia_ids": evidence_ids,
-        "responsavel": author, "sugestao_atualizacao_id": suggestion_id, "observacao": note,
-        "criado_em": utc_now_iso(),
+        "criterio_ids": current_ids(uow, story_id), "responsavel": author, "sugestao_atualizacao_id": suggestion_id,
+        "observacao": note, "criado_em": utc_now_iso(),
     })
     uow.stories.update(story_id, {"versao_atual": number})
     return number

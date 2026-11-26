@@ -100,6 +100,7 @@ CREATE TABLE IF NOT EXISTS versoes_historia (
     origem_alteracao TEXT NOT NULL,
     conteudo TEXT NOT NULL,
     evidencia_ids TEXT NOT NULL DEFAULT '[]',
+    criterio_ids TEXT NOT NULL DEFAULT '[]',
     responsavel TEXT NOT NULL,
     sugestao_atualizacao_id INTEGER,
     observacao TEXT,
@@ -117,10 +118,60 @@ CREATE TABLE IF NOT EXISTS evidencias (
     trecho TEXT NOT NULL,
     localizacao TEXT NOT NULL,
     afirmacao TEXT,
+    afirmacoes_sustentadas TEXT NOT NULL DEFAULT '[]',
     origem TEXT NOT NULL CHECK (origem IN ('extracao', 'atualizacao')),
     criado_em TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS ix_evidencias_historia ON evidencias(historia_id);
+
+-- Critérios de aceitação: id permanente; versao_historia = versão da HU em que o critério entrou.
+-- Um critério substituído (edição ou nova geração) não é apagado: fica com status 'substituido'.
+-- (historias.criterios_aceitacao é a coluna antiga, mantida só para rollback; não é mais gravada.)
+CREATE TABLE IF NOT EXISTS criterios_aceitacao (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    historia_id INTEGER NOT NULL REFERENCES historias(id) ON DELETE CASCADE,
+    codigo TEXT NOT NULL,
+    posicao INTEGER NOT NULL,
+    titulo TEXT NOT NULL,
+    criterio TEXT NOT NULL,
+    dado TEXT,
+    quando TEXT,
+    entao TEXT,
+    fontes TEXT NOT NULL DEFAULT '[]',
+    informacoes_ausentes TEXT NOT NULL DEFAULT '[]',
+    afirmacoes_sem_evidencia TEXT NOT NULL DEFAULT '[]',
+    origem TEXT NOT NULL CHECK (origem IN ('ia', 'manual', 'legado')),
+    versao_historia INTEGER NOT NULL,
+    status TEXT NOT NULL CHECK (status IN ('vigente', 'substituido')),
+    substituido_na_versao INTEGER,
+    criado_em TEXT NOT NULL,
+    atualizado_em TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS ix_criterios_historia ON criterios_aceitacao(historia_id, status, posicao);
+
+-- Auditoria semântica das evidências (prompt VALIDACAO_EVIDENCIAS). Nunca altera a HU nem os critérios.
+CREATE TABLE IF NOT EXISTS auditorias_evidencia (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    historia_id INTEGER NOT NULL REFERENCES historias(id) ON DELETE CASCADE,
+    versao_historia INTEGER NOT NULL,
+    origem TEXT NOT NULL CHECK (origem IN ('geracao', 'sob_demanda', 'lote')),
+    job_id TEXT,
+    componentes TEXT NOT NULL DEFAULT '[]',
+    criterios TEXT NOT NULL DEFAULT '[]',
+    problemas_conjunto TEXT NOT NULL DEFAULT '[]',
+    resumo TEXT NOT NULL DEFAULT '{}',
+    revisoes TEXT NOT NULL DEFAULT '[]',
+    modelo TEXT,
+    versao_prompt TEXT,
+    criado_em TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS ix_auditorias_historia ON auditorias_evidencia(historia_id, id);
+
+-- Migrações de dados já aplicadas (cada uma roda uma única vez).
+CREATE TABLE IF NOT EXISTS migracoes (
+    nome TEXT PRIMARY KEY,
+    aplicada_em TEXT NOT NULL
+);
 
 CREATE TABLE IF NOT EXISTS avaliacoes_qualidade (
     id INTEGER PRIMARY KEY AUTOINCREMENT,

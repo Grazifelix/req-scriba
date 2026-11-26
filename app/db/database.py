@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import json
 import sqlite3
+from datetime import datetime, timezone
 from pathlib import Path
 
 SCHEMA_PATH = Path(__file__).with_name("schema.sql")
@@ -11,12 +13,77 @@ OLD_ITEM_TYPES = "'funcionalidade', 'fora_de_escopo'"
 NEW_ITEM_TYPES = "'funcionalidade', 'termo', 'fora_de_escopo'"
 
 
-def _migrate(conn: sqlite3.Connection) -> None:
-    """Ajustes de bancos criados por versões anteriores do schema (idempotente).
+NEW_COLUMNS = (
+    ("evidencias", "afirmacoes_sustentadas", "TEXT NOT NULL DEFAULT '[]'"),
+    ("versoes_historia", "criterio_ids", "TEXT NOT NULL DEFAULT '[]'"),
+)
+CRITERIA_MIGRATION = "criterios_tabela_v1"
+CRITERION_EXTRAS = ("dado", "quando", "entao")
 
-    `CREATE TABLE IF NOT EXISTS` não altera tabelas existentes e o SQLite não altera CHECK com ALTER TABLE:
-    a tabela é recriada com o DDL novo e os dados copiados (procedimento recomendado pelo SQLite).
-    """
+
+def _migrate(conn: sqlite3.Connection) -> None:
+    """Ajustes de bancos criados por versões anteriores do schema (idempotente)."""
+    _migrate_item_types(conn)
+    for table, column, ddl in NEW_COLUMNS:
+        columns = {r[1] for r in conn.execute(f"PRAGMA table_info({table})")}
+        if column not in columns:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {ddl}")
+    conn.commit()
+    _migrate_criteria(conn)
+
+
+def _migrate_criteria(conn: sqlite3.Connection) -> None:
+    """Copia os critérios do JSON ``historias.criterios_aceitacao`` para a tabela ``criterios_aceitacao``
+    (uma única vez, registrada em ``migracoes``). Cada critério vira uma linha vigente da versão atual da HU,
+    e a versão atual passa a listar esses ids. A coluna antiga não é alterada (rollback possível)."""
+    if conn.execute("SELECT 1 FROM migracoes WHERE nome = ?", (CRITERIA_MIGRATION,)).fetchone():
+        return
+    stories = conn.execute(
+        "SELECT id, versao_atual, origem, criterios_aceitacao, atualizado_em FROM historias "
+        "WHERE criterios_aceitacao NOT IN ('', '[]') AND id NOT IN (SELECT historia_id FROM criterios_aceitacao)"
+    ).fetchall()
+    try:
+        for story_id, version, origin, raw, updated in stories:
+            ids = [_insert_legacy_criterion(conn, story_id, version, position, item, updated)
+                   for position, item in enumerate(_valid_criteria(raw), start=1)]
+            conn.execute("UPDATE versoes_historia SET criterio_ids = ? WHERE historia_id = ? AND numero = ?",
+                         (json.dumps(ids), story_id, version))
+        conn.execute("INSERT INTO migracoes (nome, aplicada_em) VALUES (?, ?)",
+                     (CRITERIA_MIGRATION, datetime.now(timezone.utc).isoformat()))
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+
+
+def _valid_criteria(raw: str) -> list[dict]:
+    try:
+        items = json.loads(raw)
+    except (TypeError, ValueError):
+        return []
+    return [c for c in items if isinstance(c, dict) and str(c.get("criterio") or "").strip()]
+
+
+def _insert_legacy_criterion(conn: sqlite3.Connection, story_id: int, version: int, position: int, item: dict,
+                             updated: str) -> int:
+    origin = item.get("origem") if item.get("origem") in ("ia", "manual") else "legado"
+    cur = conn.execute(
+        "INSERT INTO criterios_aceitacao (historia_id, codigo, posicao, titulo, criterio, dado, quando, entao, fontes, "
+        "informacoes_ausentes, afirmacoes_sem_evidencia, origem, versao_historia, status, criado_em, atualizado_em) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'vigente', ?, ?)",
+        (story_id, f"CA{position:02d}", position, str(item.get("titulo") or f"Critério {position}").strip(),
+         str(item["criterio"]).strip(), *(item.get(k) for k in CRITERION_EXTRAS),
+         json.dumps(item.get("fontes") or [], ensure_ascii=False),
+         json.dumps(item.get("informacoes_ausentes") or [], ensure_ascii=False),
+         json.dumps(item.get("afirmacoes_sem_evidencia") or [], ensure_ascii=False),
+         origin, version, updated, updated),
+    )
+    return int(cur.lastrowid)
+
+
+def _migrate_item_types(conn: sqlite3.Connection) -> None:
+    """`CREATE TABLE IF NOT EXISTS` não altera tabelas existentes e o SQLite não altera CHECK com ALTER TABLE:
+    a tabela é recriada com o DDL novo e os dados copiados (procedimento recomendado pelo SQLite)."""
     row = conn.execute("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'itens_analise'").fetchone()
     if not row or "'termo'" in row[0]:
         return

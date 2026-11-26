@@ -2,6 +2,8 @@
 
 import pytest
 
+from app.domain.criteria import criteria_content
+
 from app.core.errors import ConflictError
 from app.domain.enums import StoryStatus
 from app.services.generation import run_generation, start_generation
@@ -160,7 +162,7 @@ def test_partial_proposal_keeps_current_fields(container, project_id, approved_s
     proposed = update["conteudo_proposto"]
     assert proposed["funcionalidade"] == "emitir o boletim da turma em PDF"
     assert proposed["beneficio"] == before["beneficio"] and proposed["perfil"] == before["perfil"]
-    assert proposed["criterios_aceitacao"] == before["criterios_aceitacao"]
+    assert criteria_content(proposed["criterios_aceitacao"]) == criteria_content(before["criterios_aceitacao"])
 
 
 def test_complement_without_real_change_attaches_evidence(container, project_id, approved_story):

@@ -13,7 +13,13 @@ from app.repositories.sources import (
     SegmentRepository,
     SourceChunkRepository,
 )
-from app.repositories.stories import EvidenceRepository, StoryRepository, VersionRepository
+from app.repositories.stories import (
+    CriterionRepository,
+    EvidenceAuditRepository,
+    EvidenceRepository,
+    StoryRepository,
+    VersionRepository,
+)
 from app.repositories.workflow import (
     EvaluationRepository,
     JobRepository,
@@ -36,6 +42,8 @@ class UnitOfWork:
         self.stories = StoryRepository(self.conn)
         self.versions = VersionRepository(self.conn)
         self.evidences = EvidenceRepository(self.conn)
+        self.criteria = CriterionRepository(self.conn)
+        self.evidence_audits = EvidenceAuditRepository(self.conn)
         self.evaluations = EvaluationRepository(self.conn)
         self.questions = QuestionRepository(self.conn)
         self.suggestions = UpdateSuggestionRepository(self.conn)

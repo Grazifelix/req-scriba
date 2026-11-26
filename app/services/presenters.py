@@ -141,6 +141,7 @@ def version(v: dict) -> dict:
             ChangeOrigin.AI_GENERATION.value, ChangeOrigin.AI_SUGGESTION.value, ChangeOrigin.AI_SUGGESTION_EDITED.value,
             ChangeOrigin.AI_CRITERIA.value),
         "historia": content.get("historia"), "conteudo": content, "evidencia_ids": v["evidencia_ids"],
+        "criterio_ids": v.get("criterio_ids") or [],
         "responsavel": v["responsavel"], "sugestao_atualizacao_id": v["sugestao_atualizacao_id"],
         "observacao": v["observacao"], "data_hora": v["criado_em"],
     }

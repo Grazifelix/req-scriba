@@ -137,7 +137,8 @@ def test_criteria_stage_receives_stories_and_their_evidences_without_changing_th
         "o usuário autorizado", "ele executa a funcionalidade", "o sistema registra o resultado")
     with container.uow() as uow:
         [evidence] = uow.evidences.list_by_story(first["id"])
-    assert criterion["fontes"] == [{"trecho_id": evidence["trecho_id"], "afirmacoes_sustentadas": ["entao"]}]
+    assert criterion["fontes"] == [{"trecho_id": evidence["trecho_id"], "afirmacoes_sustentadas": ["entao"],
+                                    "evidencia_id": evidence["id"]}]
     assert criterion["afirmacoes_sem_evidencia"] == []
     # a versão 1 já nasce com os critérios (persistência só depois da etapa de critérios)
     assert first["versoes"][0]["conteudo"]["criterios_aceitacao"][0]["dado"] == "o usuário autorizado"
@@ -345,8 +346,9 @@ def test_manual_edit_of_criteria_list_keeps_traceability_of_unchanged_criteria(c
         kept, edited, added = StoryService(uow).update(stored_story, {"criterios_aceitacao": payload}, "ana")["criterios_aceitacao"]
     assert kept["fontes"] == generated[0]["fontes"] and kept["dado"] == generated[0]["dado"]
     assert kept["origem"] == "ia"
-    assert "fontes" not in edited and "origem" not in edited
-    assert "fontes" not in added
+    assert kept["criterio_id"] == generated[0]["criterio_id"]  # mesmo critério, mesmo id permanente
+    assert edited["fontes"] == [] and edited["origem"] == "manual" and edited["versao_historia"] == 3
+    assert added["fontes"] == [] and added["criterio_id"] not in {c["criterio_id"] for c in generated}
 
 
 def test_stage_progress_is_visible_while_job_runs(container, project_id, audio_id):
@@ -363,3 +365,38 @@ def test_stage_progress_is_visible_while_job_runs(container, project_id, audio_i
     assert seen["status"] == "processando"
     assert seen["etapas"][-1] == ("geracao_criterios", "em_andamento")
     assert all(status == "concluida" for _, status in seen["etapas"][:-1])
+
+
+# ---------- tabela própria: ids permanentes, histórico e vínculo com as versões ----------
+
+def test_criteria_rows_are_preserved_when_replaced_and_linked_to_versions(container, stored_story):
+    with container.uow() as uow:
+        first = CriteriaService(uow, container).generate(stored_story, "ana")["criterios_aceitacao"]
+    container.llm.handlers["GERACAO_CRITERIOS_ACEITACAO"] = lambda p: {"historias": [{"id": h, "criterios_aceitacao": [
+        {"dado": "um bimestre encerrado", "quando": "o coordenador emitir", "entao": "o boletim fica disponível"}]}
+        for h in re.findall(r"^\[(H\d+)\]", p, flags=re.M)]}
+    with container.uow() as uow:
+        second = CriteriaService(uow, container).generate(stored_story, "ana")
+    [current] = second["criterios_aceitacao"]
+    assert current["status"] == "vigente" and current["versao_historia"] == 3
+    with container.uow() as uow:
+        rows = {r["id"]: r for r in uow.criteria.list_by_story(stored_story)}
+        versions = {v["numero"]: v for v in uow.versions.list_by_story(stored_story)}
+    old_ids = [c["criterio_id"] for c in first]
+    assert all(rows[i]["status"] == "substituido" and rows[i]["substituido_na_versao"] == 3 for i in old_ids)
+    assert versions[1]["criterio_ids"] == [] and versions[2]["criterio_ids"] == old_ids
+    assert versions[3]["criterio_ids"] == [current["criterio_id"]]
+    assert versions[2]["conteudo"]["criterios_aceitacao"][0]["criterio"] == first[0]["criterio"]  # snapshot
+
+
+def test_story_repository_refuses_writing_legacy_criteria_column(container, stored_story):
+    with container.uow() as uow, pytest.raises(ValueError, match="criterios_aceitacao"):
+        uow.stories.update(stored_story, {"criterios_aceitacao": []})
+
+
+def test_content_edit_without_criteria_change_keeps_criteria_rows(container, stored_story):
+    with container.uow() as uow:
+        before = CriteriaService(uow, container).generate(stored_story, "ana")["criterios_aceitacao"]
+        after = StoryService(uow).update(stored_story, {"beneficio": "acompanhar as notas"}, "ana")
+    assert [c["criterio_id"] for c in after["criterios_aceitacao"]] == [c["criterio_id"] for c in before]
+    assert after["versao_atual"] == 3

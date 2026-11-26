@@ -9,6 +9,7 @@ from app.core.errors import BusinessValidationError, NotFoundError
 from app.core.time import utc_now_iso
 from app.db.unit_of_work import UnitOfWork
 from app.domain import story_format
+from app.domain.criteria import CRITERION_EXTRA_FIELDS, criteria_content, number_criteria
 from app.domain.text import normalize
 from app.domain.enums import ChangeOrigin, ChangeType, StoryStatus
 from app.llm import parsing, prompts
@@ -16,7 +17,8 @@ from app.services import presenters
 from app.services.common import require_project, require_story
 from app.services.evidence import NO_SOURCE_CLAIM, add_evidences
 from app.services.retrieval import describe_chunk
-from app.services.versioning import create_version, snapshot
+from app.services.criteria_store import sync_criteria
+from app.services.versioning import create_version, same_content, snapshot
 
 TEMPLATE_ELEMENTS = set(story_format.ELEMENTS)
 MAX_SPLIT_EVIDENCE_BLOCKS = 8
@@ -26,21 +28,7 @@ MISSING_CRITERIA = {
 }
 
 
-# Campos dos critérios gerados pela IA (GERACAO_CRITERIOS_ACEITACAO), preservados quando presentes.
-CRITERION_EXTRA_FIELDS = ("dado", "quando", "entao", "fontes", "informacoes_ausentes", "afirmacoes_sem_evidencia", "origem")
-
-
-def number_criteria(criteria: list[dict] | None) -> list[dict]:
-    """Atribui ids CA01, CA02… preservando título, texto e os campos de rastreabilidade do critério."""
-    numbered = []
-    for c in criteria or []:
-        if not (c.get("criterio") or "").strip():
-            continue
-        i = len(numbered) + 1
-        item = {"id": f"CA{i:02d}", "titulo": (c.get("titulo") or f"Critério {i}").strip(), "criterio": c["criterio"].strip()}
-        item.update({k: c[k] for k in CRITERION_EXTRA_FIELDS if c.get(k) is not None})
-        numbered.append(item)
-    return numbered
+__all__ = ["CRITERION_EXTRA_FIELDS", "number_criteria"]  # reexportados (usados pelos serviços de critérios)
 
 
 def keep_traceability(incoming: list[dict], current: list[dict]) -> list[dict]:
@@ -112,29 +100,37 @@ def create_story_record(
     if origin == "ia" and not evidence_specs:
         claims.append(NO_SOURCE_CLAIM)
     now = utc_now_iso()
+    criteria = content.pop("criterios_aceitacao")
     story_id = uow.stories.insert({
         "projeto_id": project_id, "codigo": uow.stories.next_code(project_id), **content,
         "status": status_for(missing), "informacoes_ausentes": missing, "afirmacoes_sem_evidencia": claims,
         "origem": origin, "versao_atual": 1, "criado_em": now, "atualizado_em": now,
     })
-    add_evidences(uow, story_id, evidence_specs or [], evidence_origin)
+    add_evidences(uow, story_id, evidence_specs or [], evidence_origin)  # antes dos critérios: eles citam evidências
+    sync_criteria(uow, story_id, criteria, 1)
     create_version(uow, story_id, change_type, change_origin, author, suggestion_id)
     return story_id
 
 
 def apply_content_change(uow: UnitOfWork, story: dict, changes: dict) -> dict | None:
-    """Aplica mudanças de conteúdo. Retorna o novo conteúdo ou None se nada mudou."""
+    """Aplica mudanças de conteúdo. Retorna o novo conteúdo ou None se nada mudou.
+
+    Critérios alterados são reconciliados na tabela de critérios como pertencentes à próxima versão, que o
+    chamador cria logo em seguida (``create_version``)."""
     merged = {**snapshot(story), **changes}
     content = build_content(merged)
-    if content == snapshot(story):
+    if same_content(content, story):
         return None
     missing = merge_missing_info(
         content["perfil"], content["funcionalidade"], content["beneficio"], story["informacoes_ausentes"]
     )
+    fields = {k: v for k, v in content.items() if k != "criterios_aceitacao"}
     uow.stories.update(story["id"], {
-        **content, "informacoes_ausentes": missing, "status": status_for(missing, story["status"]),
+        **fields, "informacoes_ausentes": missing, "status": status_for(missing, story["status"]),
         "atualizado_em": utc_now_iso(),
     })
+    if criteria_content(content["criterios_aceitacao"]) != snapshot(story)["criterios_aceitacao"]:
+        sync_criteria(uow, story["id"], content["criterios_aceitacao"], story["versao_atual"] + 1)
     return content
 
 
