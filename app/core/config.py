@@ -81,6 +81,11 @@ class Settings:
     generation_criteria: bool = field(default_factory=lambda: _env_bool("GENERATION_CRITERIA", True))
     # Auditoria semântica das evidências (VALIDACAO_EVIDENCIAS) ao fim do job de geração
     generation_evidence_audit: bool = field(default_factory=lambda: _env_bool("GENERATION_EVIDENCE_AUDIT", True))
+    # Análise de novas fontes: histórias mais próximas por embeddings para cada trecho novo (posição no ranking),
+    # máximo de histórias por chamada e evidências atuais enviadas por história
+    impact_top_stories: int = field(default_factory=lambda: _env_int("IMPACT_TOP_STORIES", 3))
+    impact_max_stories: int = field(default_factory=lambda: _env_int("IMPACT_MAX_STORIES", 12))
+    impact_evidences_per_story: int = field(default_factory=lambda: _env_int("IMPACT_EVIDENCES_PER_STORY", 3))
     cors_origins: list[str] = field(
         default_factory=lambda: [
             o.strip()

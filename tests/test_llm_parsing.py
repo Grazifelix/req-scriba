@@ -68,14 +68,10 @@ def test_normalize_questions_validates_defect_refs():
     assert limitations == [{"defeito": None, "motivo": "sem contexto"}]
 
 
-def test_normalize_impact_relations():
-    assert parsing.normalize_impact({"relacao": "Contradiz"}, set())["relacao"] == "contradiz"
-    assert parsing.normalize_impact({"relacao": "complementa a história"}, set())["relacao"] == "complementa"
-    assert parsing.normalize_impact({"relacao": "outra coisa"}, set())["relacao"] == "sem_relacao"
-    result = parsing.normalize_impact(
-        {"relacao": "complementa", "proposta": {"funcionalidade": "x"}, "fontes": ["F1", "F5"]}, {"F1"}
-    )
-    assert result["fontes"] == ["F1"] and result["proposta"]["funcionalidade"] == "x"
+def test_impact_categories_and_existing_evidence_labels():
+    assert parsing.impact_category("Complementação") == "COMPLEMENTACAO"
+    assert parsing.impact_category("contradição") == "CONTRADICAO" and parsing.impact_category("x") is None
+    assert parsing.normalize_label("E2") == "E2"
 
 
 def test_normalize_label_keeps_context_and_candidate_prefixes():

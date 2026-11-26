@@ -335,6 +335,17 @@ frontend usa esses campos para mostrar em quais fontes a IA se baseou.
   desconhecido → `INSUFICIENTE`; trecho fora dos vinculados → problema; resumo contado pelo código. Gravada em
   `auditorias_evidencia`; revisão humana por item em `POST /auditorias-evidencias/{id}/revisoes`. Etapa
   `auditoria_evidencias` ao fim do job de geração (não fatal).
+- **Novas fontes (Milestone 3, `### TAREFA: ANALISE_IMPACTO_FONTES`, template `analise_impacto_fontes.md`):** etapas
+  `preparacao` → `recuperacao` → `analise_impacto` → `consolidacao` → `persistencia`. Recebe os trechos novos (F),
+  as HU candidatas com campos, evidências atuais (E), critérios (H…-CA…) e os trechos novos que as apontaram, a
+  análise aprovada e os critérios QUS. Devolve `impactos_identificados` (categoria, história, trechos novos,
+  justificativa, evidências com componentes, `alteracao_proposta` em campos, `criterios_afetados` REVISAR/MANTER),
+  `novas_historias_propostas` (id temporário, campos, fontes com citação), `conflitos_identificados` e
+  `historias_nao_afetadas`. Cada item vira uma sugestão pendente com `tipo` = `confirmacao | complementacao |
+  modificacao | contradicao | nova_necessidade`, `versao_base` e `detalhes` (componentes e critérios afetados,
+  reclassificação, conflitos, alternativa, sinais de recuperação, id temporário e possíveis duplicidades). O
+  resultado do job traz `por_categoria`, fontes analisadas e ignoradas, HU candidatas, analisadas, fora do limite e
+  não afetadas, reclassificadas e descartadas. Regras de classificação e aprovação: D44 e D45.
 - **Critérios sob demanda:** `POST /historias/{id}/criterios/gerar` (síncrono) e
   `POST /projetos/{id}/criterios/gerar` (job `geracao_criterios`; ignora HU aprovadas, desaprovadas e, sem
   `substituir`, as que já têm critérios). Os critérios novos substituem os atuais numa nova versão (origem
@@ -471,6 +482,9 @@ Fakes: `FakeLLM` (roteia pelo marcador `### TAREFA:` do prompt), `FakeTranscribe
 | `REQSCRIBA_GENERATION_CRITERIA` | `true` (etapa de critérios de aceitação dentro do job de geração) |
 | `REQSCRIBA_CRITERIA_RELATED_CHUNKS` | `2` (trechos relacionados por HU no prompt de critérios; `0` desliga) |
 | `REQSCRIBA_GENERATION_EVIDENCE_AUDIT` | `true` (auditoria semântica das evidências ao fim do job de geração) |
+| `REQSCRIBA_IMPACT_TOP_STORIES` | `3` (HU mais próximas por embeddings para cada trecho novo; `0` desliga o sinal) |
+| `REQSCRIBA_IMPACT_MAX_STORIES` | `12` (HU candidatas por chamada de ANALISE_IMPACTO_FONTES) |
+| `REQSCRIBA_IMPACT_EVIDENCES_PER_STORY` | `3` (evidências atuais de cada HU enviadas ao prompt) |
 | `REQSCRIBA_LLM_STRUCTURED_OUTPUT` | `false` (envia o JSON Schema do prompt ao provedor) |
 | `REQSCRIBA_CORS_ORIGINS` | `http://localhost:3000,http://localhost:5173` |
 | `REQSCRIBA_LOG_LEVEL` | `INFO` |

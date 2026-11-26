@@ -140,13 +140,15 @@ def answer_question(pergunta_id: int, body: QuestionAnswer, service: QuestionSer
 @router.post("/projetos/{projeto_id}/atualizacoes/analisar", response_model=JobOut,
              status_code=status.HTTP_202_ACCEPTED, tags=["Atualizações"],
              summary="Analisar novas fontes (US-13)",
-             description="Compara novas transcrições/documentos com as histórias existentes e cria sugestões "
-                         "(complementa, contradiz, novo_requisito). Nenhuma história é alterada (US-14 CA04).")
+             description="Processa só as fontes novas (as já processadas são ignoradas, salvo `reprocessar`), recupera "
+                         "as histórias potencialmente relacionadas e aplica ANALISE_IMPACTO_FONTES. Cria propostas "
+                         "pendentes: confirmacao, complementacao, modificacao, contradicao e nova_necessidade. "
+                         "Nenhuma história é alterada sem aprovação (US-14 CA04).")
 def analyze_updates(
     projeto_id: int, body: AnalysisRequest, background: BackgroundTasks,
     uow: UnitOfWork = Depends(get_uow), container: Container = Depends(get_container), actor: str = Depends(get_actor),
 ):
-    job = start_analysis(uow, projeto_id, body.audio_ids, body.documento_ids, actor)
+    job = start_analysis(uow, projeto_id, body.audio_ids, body.documento_ids, actor, body.reprocessar)
     uow.commit()
     background.add_task(tasks.run_update_analysis, container, job["id"])
     return job

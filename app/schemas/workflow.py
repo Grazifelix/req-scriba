@@ -132,6 +132,9 @@ class QuestionAnswer(InputModel):
 class AnalysisRequest(InputModel):
     audio_ids: list[int] = Field(default_factory=list, max_length=100)
     documento_ids: list[int] = Field(default_factory=list, max_length=100)
+    reprocessar: bool = Field(
+        default=False, description="Analisa também fontes já processadas por outro job de geração ou de atualização."
+    )
 
 
 class SuggestionEdit(InputModel):
@@ -151,7 +154,8 @@ class SuggestionApprove(InputModel):
 class SuggestionOut(OutputModel):
     id: int
     historia_id: Optional[int] = Field(description="Nulo quando é um possível novo requisito")
-    tipo: str = Field(description="complementa | contradiz | novo_requisito")
+    tipo: str = Field(description="confirmacao | complementacao | modificacao | contradicao | nova_necessidade "
+                                  "(complementa | contradiz | novo_requisito: sugestões anteriores ao Milestone 3)")
     tipo_rotulo: str
     justificativa: str
     conteudo_atual: Optional[dict[str, Any]]
@@ -169,6 +173,14 @@ class SuggestionOut(OutputModel):
     versao_aplicada: Optional[int]
     historia_criada_id: Optional[int]
     comparacao: Optional[dict[str, Any]] = None
+    versao_base: Optional[int] = Field(default=None, description="Versão da história quando a proposta foi gerada")
+    versao_atual_historia: Optional[int] = None
+    detalhes: dict[str, Any] = Field(
+        default_factory=dict,
+        description="componentes_afetados, criterios_afetados, categoria_original (reclassificação), conflitos, "
+                    "alternativa_proposta, sinais_recuperacao; nas novas necessidades: id_temporario, "
+                    "possiveis_duplicidades",
+    )
 
 
 class SuggestionList(OutputModel):

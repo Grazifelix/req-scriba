@@ -12,8 +12,7 @@ from app.services.consolidation import apply_operations
 from app.services.generation import run_generation, start_generation
 from app.services.source_analysis import run_source_analysis, start_source_analysis
 from app.services.stories import StoryService
-from app.services.updates import UpdateService, run_update_analysis, start_analysis
-from tests.conftest import ensure_approved_analysis, upload_document
+from tests.conftest import ensure_approved_analysis
 from tests.fakes import default_extraction
 
 
@@ -178,54 +177,3 @@ def test_merge_never_joins_transitively_conflicting_candidates():
     assert [c["funcionalidade"] for c in result] == ["a", "c"]
     assert [e["trecho_id"] for e in result[0]["evidencias"]] == ["a", "b"]
     assert summary["fusoes"] == 1
-
-
-# ---------- análise de novas fontes ----------
-
-NEW_DOC = (
-    "Ata da segunda entrevista: o boletim será disponibilizado em PDF para download.\n\n"
-    "Os responsáveis querem receber notificações por e-mail quando houver faltas."
-)
-
-
-@pytest.fixture
-def existing_story(container, project_id, audio_id):
-    return generate(container, project_id, [audio_id])["resultado"]["historias_criadas"][0]
-
-
-def analyze_new_sources(container, project_id):
-    container.llm.handlers["CONTEXTO_REUNIAO"] = lambda p: {
-        "perfis": [{"texto": "Responsáveis acompanham a frequência dos alunos.", "fontes": ["F1"]}],
-    }
-    container.llm.handlers["GERACAO_US_QUS"] = widened_after_extraction(container, lambda p: {"historias": [
-        story("receber notificações de faltas por e-mail", "responsável", "acompanhar a frequência"),
-        story("ser avisado quando o filho faltar", "responsável", None),
-    ]})
-    container.llm.handlers["CONSOLIDACAO_HISTORIAS"] = lambda p: {"fundir": [{"historias": ["C1", "C2"]}]}
-    container.settings.chunk_size, container.settings.chunk_overlap = 50, 5  # vários lotes sem correspondência
-    new_doc = upload_document(container, project_id, NEW_DOC, "ata2.txt")
-    with container.uow() as uow:
-        job = start_analysis(uow, project_id, [], [new_doc], "ana")
-    run_update_analysis(container, job["id"])
-    with container.uow() as uow:
-        result = uow.jobs.get(job["id"])["resultado"]
-        items = UpdateService(uow).list(project_id)["itens"]
-    assert result["consolidacao"]["fusoes"] == 1
-    assert len([s for s in items if s["tipo"] == "novo_requisito"]) == 1
-    return result
-
-
-def test_new_requirements_use_approved_analysis_instead_of_context(container, project_id, existing_story):
-    result = analyze_new_sources(container, project_id)
-    assert result["contexto"] is None and not container.llm.prompts_for("CONTEXTO_REUNIAO")
-    prompt = container.llm.prompts_for("GERACAO_US_QUS")[-1]
-    assert "ANALISE DO PROJETO:" in prompt and "CONTEXTO GERAL" not in prompt
-
-
-def test_new_requirements_use_context_without_approved_analysis(container, project_id, existing_story):
-    with container.uow() as uow:
-        analysis = uow.analyses.latest_reviewed(project_id)
-        AnalysisService(uow).update(analysis["id"], {"revisada": False}, "ana")
-    result = analyze_new_sources(container, project_id)
-    assert result["contexto"]["itens"] == 1
-    assert "[R1] (perfil)" in container.llm.prompts_for("GERACAO_US_QUS")[-1]

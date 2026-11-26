@@ -1,0 +1,113 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ANALISE_IMPACTO_FONTES",
+  "description": "Impactos de novas fontes sobre histórias existentes (o resumo numérico é calculado pelo código).",
+  "type": "object",
+  "required": ["impactos_identificados", "novas_historias_propostas", "conflitos_identificados", "historias_nao_afetadas"],
+  "properties": {
+    "impactos_identificados": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["categoria", "historia_ref", "trechos_novos", "justificativa", "evidencias_relacionadas",
+                     "alteracao_proposta", "criterios_afetados"],
+        "properties": {
+          "categoria": {"type": "string", "enum": ["CONFIRMACAO", "COMPLEMENTACAO", "MODIFICACAO", "CONTRADICAO"]},
+          "historia_ref": {"type": "string"},
+          "trechos_novos": {"type": "array", "items": {"type": "string"}},
+          "justificativa": {"type": "string"},
+          "evidencias_relacionadas": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["trecho_id", "afirmacoes_sustentadas"],
+              "properties": {
+                "trecho_id": {"type": "string"},
+                "afirmacoes_sustentadas": {
+                  "type": "array", "items": {"type": "string", "enum": ["perfil", "funcionalidade", "beneficio"]}
+                }
+              }
+            }
+          },
+          "alteracao_proposta": {
+            "type": ["object", "null"],
+            "required": ["titulo", "perfil", "funcionalidade", "beneficio", "componentes_afetados"],
+            "properties": {
+              "titulo": {"type": "string"},
+              "perfil": {"type": ["string", "null"]},
+              "funcionalidade": {"type": "string"},
+              "beneficio": {"type": ["string", "null"]},
+              "componentes_afetados": {
+                "type": "array", "items": {"type": "string", "enum": ["perfil", "funcionalidade", "beneficio"]}
+              }
+            }
+          },
+          "criterios_afetados": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["criterio_id", "acao_recomendada"],
+              "properties": {
+                "criterio_id": {"type": "string"},
+                "acao_recomendada": {"type": "string", "enum": ["REVISAR", "MANTER"]}
+              }
+            }
+          }
+        }
+      }
+    },
+    "novas_historias_propostas": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id_temporario", "funcionalidade_ref", "titulo", "perfil", "funcionalidade", "beneficio", "fontes",
+                     "informacoes_ausentes", "afirmacoes_sem_evidencia"],
+        "properties": {
+          "id_temporario": {"type": "string"},
+          "funcionalidade_ref": {"type": ["string", "null"]},
+          "titulo": {"type": "string"},
+          "perfil": {"type": ["string", "null"]},
+          "funcionalidade": {"type": "string"},
+          "beneficio": {"type": ["string", "null"]},
+          "fontes": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["trecho_id", "afirmacoes_sustentadas", "citacao"],
+              "properties": {
+                "trecho_id": {"type": "string"},
+                "afirmacoes_sustentadas": {
+                  "type": "array", "items": {"type": "string", "enum": ["perfil", "funcionalidade", "beneficio"]}
+                },
+                "citacao": {"type": "string"}
+              }
+            }
+          },
+          "informacoes_ausentes": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["elemento", "descricao"],
+              "properties": {"elemento": {"type": "string"}, "descricao": {"type": "string"}}
+            }
+          },
+          "afirmacoes_sem_evidencia": {"type": "array", "items": {"type": "string"}}
+        }
+      }
+    },
+    "conflitos_identificados": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["historia_ref", "trechos_conflitantes", "descricao", "impacto"],
+        "properties": {
+          "historia_ref": {"type": "string"},
+          "trechos_conflitantes": {"type": "array", "items": {"type": "string"}},
+          "descricao": {"type": "string"},
+          "impacto": {"type": "string"}
+        }
+      }
+    },
+    "historias_nao_afetadas": {"type": "array", "items": {"type": "string"}}
+  }
+}

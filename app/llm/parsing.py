@@ -69,11 +69,11 @@ def _as_list(value: Any) -> list[Any]:
     return [value]
 
 
-_LABEL_RE = re.compile(r"(?<![^\W_])([FRCfrc])?\s*(\d+)")  # início não pode vir colado a letra ou dígito
+_LABEL_RE = re.compile(r"(?<![^\W_])([FRCEfrce])?\s*(\d+)")  # início não pode vir colado a letra ou dígito
 
 
 def normalize_label(value: Any, default_prefix: str = "F") -> str | None:
-    """Converte "F3", "[F3]", "f3" ou 3 em "F3"; preserva os prefixos R (contexto) e C (candidata).
+    """Converte "F3", "[F3]", "f3" ou 3 em "F3"; preserva os prefixos R (contexto), C (candidata) e E (evidência atual).
 
     Números colados a outras letras ("FN1", "RN2", "H1") não são rótulos de fonte e são rejeitados.
     """
@@ -677,17 +677,87 @@ def normalize_questions(data: dict[str, Any], valid_refs: set[str]) -> tuple[lis
     return questions, limitations
 
 
-IMPACT_RELATIONS = {"sem_relacao", "confirma", "complementa", "contradiz"}
+# -- Impacto de novas fontes (ANALISE_IMPACTO_FONTES) -----------------------
+IMPACT_CATEGORIES = ("CONFIRMACAO", "COMPLEMENTACAO", "MODIFICACAO", "CONTRADICAO")
+CRITERION_ACTIONS = ("REVISAR", "MANTER")
 
 
-def normalize_impact(data: dict[str, Any], valid_labels: set[str]) -> dict[str, Any]:
-    raw = _key(_pick(data, "relacao", "relation", "tipo", default="sem_relacao"))
-    raw = raw.replace("ç", "c").replace("ã", "a")
-    relation = next((r for r in IMPACT_RELATIONS if raw.startswith(r[:6])), "sem_relacao")
-    proposal = _pick(data, "proposta", "historia_proposta", "proposal")
+def impact_category(value: Any) -> str | None:
+    key = _key(value).upper().replace("Ç", "C").replace("Ã", "A")
+    return next((c for c in IMPACT_CATEGORIES if key.startswith(c[:7])), None)
+
+
+def _story_ref(value: Any, valid: set[str]) -> str | None:
+    ref = _code(value, "H")
+    return ref if ref in valid else None
+
+
+def _impact_item(raw: dict, story_refs: set[str], new_labels: set[str], all_labels: set[str]) -> dict[str, Any] | None:
+    category = impact_category(_pick(raw, "categoria", "category", "tipo"))
+    ref = _story_ref(_pick(raw, "historia_ref", "historia", "historia_id"), story_refs)
+    if not category or not ref:
+        return None
+    new = _labels(_pick(raw, "trechos_novos", "trechos", "fontes"), new_labels)
+    related, _ = source_entries(_pick(raw, "evidencias_relacionadas"), new_labels)
+    for entry in related:  # um trecho em evidencias_relacionadas também é um trecho novo citado
+        if entry["rotulo"] not in new:
+            new.append(entry["rotulo"])
+    proposal = _pick(raw, "alteracao_proposta", "proposta")
+    criteria = []
+    for item in _as_list(_pick(raw, "criterios_afetados")):
+        if isinstance(item, dict):
+            cref = str(_pick(item, "criterio_id", "id", default="")).strip().upper()
+            action = _key(_pick(item, "acao_recomendada", "acao", default="REVISAR")).upper()
+            criteria.append({"ref": cref, "acao": action if action in CRITERION_ACTIONS else "REVISAR"})
     return {
-        "relacao": relation,
-        "justificativa": _text(_pick(data, "justificativa", "motivo", "reason"), 1500) or "",
-        "proposta": normalize_story(proposal, valid_labels) if isinstance(proposal, dict) else None,
-        "fontes": _labels(_pick(data, "fontes", "sources", "evidencias"), valid_labels),
+        "categoria": category, "historia_ref": ref, "trechos_novos": new,
+        "afirmacoes": {e["rotulo"]: e["afirmacoes"] for e in related},
+        "justificativa": _text(_pick(raw, "justificativa", "motivo"), 1500) or "",
+        "proposta": normalize_story(proposal, all_labels) if isinstance(proposal, dict) else None,
+        "componentes_afetados": _components(_pick(proposal, "componentes_afetados") if isinstance(proposal, dict) else None,
+                                            STORY_COMPONENTS),
+        "criterios_afetados": criteria,
     }
+
+
+def _conflict(raw: Any, story_refs: set[str], all_labels: set[str]) -> dict[str, Any] | None:
+    if not isinstance(raw, dict):
+        return None
+    ref = _story_ref(_pick(raw, "historia_ref", "historia"), story_refs)
+    labels = [normalize_label(x) for x in _as_list(_pick(raw, "trechos_conflitantes", "trechos", "fontes"))]
+    labels = [label for label in dict.fromkeys(labels) if label in all_labels]
+    description = _text(_pick(raw, "descricao", "description"), 1500)
+    if not ref or not description:
+        return None
+    return {"historia_ref": ref, "trechos": labels, "descricao": description,
+            "impacto": _text(_pick(raw, "impacto"), 1000)}
+
+
+def normalize_impact_sources_result(
+    data: dict[str, Any], story_refs: set[str], new_labels: set[str], existing_labels: set[str],
+) -> dict[str, Any]:
+    """Resposta de ANALISE_IMPACTO_FONTES. Só referências conhecidas: história fora do lote, trecho inexistente ou
+    categoria inválida descartam o item (contados em ``descartados``). Novas histórias citam só trechos novos."""
+    all_labels = new_labels | existing_labels
+    impacts, discarded = [], 0
+    for raw in _as_list(_pick(data, "impactos_identificados", "impactos")):
+        item = _impact_item(raw, story_refs, new_labels, all_labels) if isinstance(raw, dict) else None
+        if item is None or not item["trechos_novos"]:
+            discarded += 1
+            continue
+        impacts.append(item)
+    stories = []
+    for index, raw in enumerate(_as_list(_pick(data, "novas_historias_propostas", "novas_historias")), start=1):
+        story = normalize_story(raw, new_labels) if isinstance(raw, dict) else None
+        if story is None:
+            discarded += 1
+            continue
+        story["id_temporario"] = _text(_pick(raw, "id_temporario", "id"), 20) or f"NOVA-{index}"
+        story["funcionalidade_ref"] = _code(_pick(raw, "funcionalidade_ref"), "FN")
+        stories.append(story)
+    conflicts = [c for c in (_conflict(x, story_refs, all_labels)
+                             for x in _as_list(_pick(data, "conflitos_identificados", "conflitos"))) if c]
+    unaffected = [r for r in (_story_ref(x, story_refs) for x in _as_list(_pick(data, "historias_nao_afetadas"))) if r]
+    return {"impactos": impacts, "novas_historias": stories, "conflitos": conflicts,
+            "historias_nao_afetadas": list(dict.fromkeys(unaffected)), "descartados": discarded}
+

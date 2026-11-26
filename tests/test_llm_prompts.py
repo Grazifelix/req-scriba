@@ -49,6 +49,7 @@ def _format_example(template_name: str) -> dict:
 
 @pytest.mark.parametrize("name,schema", [
     (prompts.STORY_GENERATION, prompts.STORY_SCHEMA), (prompts.CRITERIA_GENERATION, prompts.CRITERIA_SCHEMA),
+    (prompts.EVIDENCE_AUDIT, prompts.AUDIT_SCHEMA), (prompts.IMPACT_SOURCES, prompts.IMPACT_SCHEMA),
 ])
 def test_prompt_response_example_matches_its_schema(name, schema):
     assert _required_keys_present(schema, _format_example(name)) == []

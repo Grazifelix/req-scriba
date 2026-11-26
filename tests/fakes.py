@@ -110,15 +110,39 @@ def default_questions(prompt: str) -> dict[str, Any]:
     return {"perguntas": questions, "limitacoes": limitations}
 
 
-def default_impact(prompt: str) -> dict[str, Any]:
-    existing = prompt.split("HISTÓRIA EXISTENTE:")[1].split("### TAREFA")[0]
-    if "boletim" in existing.lower():
-        return {"relacao": "complementa", "justificativa": "Define o formato PDF.",
-                "proposta": {"titulo": "Emitir boletim em PDF", "perfil": "coordenador pedagógico",
-                             "funcionalidade": "emitir o boletim da turma em PDF",
-                             "beneficio": "acompanhar o desempenho dos alunos", "criterios_aceitacao": []},
-                "fontes": ["F1"]}
-    return {"relacao": "sem_relacao", "justificativa": "", "fontes": []}
+def labeled_texts(prompt: str, tag: str) -> dict[str, str]:
+    """Rótulo → texto dos blocos entre <tag> e </tag> do prompt."""
+    block = prompt.split(f"<{tag}>")[1].split(f"</{tag}>")[0]
+    parts = re.split(r"^\[([FE]\d+)\] \(.*?\)\n", block, flags=re.M)
+    return {label: text.strip() for label, text in zip(parts[1::2], parts[2::2])}
+
+
+def default_impact_sources(prompt: str) -> dict[str, Any]:
+    """Boletim + trecho com "PDF" → MODIFICACAO (funcionalidade em PDF); trecho com "notifica" → nova necessidade;
+    demais histórias → não afetadas."""
+    new = labeled_texts(prompt, "fontes_novas")
+    stories = re.findall(r"^\[(H\d+)\] US-\d+: (.*)$", prompt, flags=re.M)
+    pdf = next((l for l, t in new.items() if "pdf" in t.lower()), None)
+    impacts, unaffected = [], []
+    for ref, text in stories:
+        if "boletim" in text.lower() and pdf:
+            impacts.append({"categoria": "MODIFICACAO", "historia_ref": ref, "trechos_novos": [pdf],
+                            "justificativa": "Define o formato PDF.",
+                            "evidencias_relacionadas": [{"trecho_id": pdf, "afirmacoes_sustentadas": ["funcionalidade"]}],
+                            "alteracao_proposta": {"titulo": "Emitir boletim em PDF", "perfil": "coordenador pedagógico",
+                                                   "funcionalidade": "emitir o boletim da turma em PDF",
+                                                   "beneficio": "acompanhar o desempenho dos alunos",
+                                                   "componentes_afetados": ["funcionalidade"]},
+                            "criterios_afetados": [{"criterio_id": f"{ref}-CA1", "acao_recomendada": "REVISAR"}]})
+        else:
+            unaffected.append(ref)
+    notify = next((l for l, t in new.items() if "notifica" in t.lower()), None)
+    new_stories = [{"id_temporario": "NOVA-1", "titulo": "Notificar faltas", "perfil": "responsável",
+                    "funcionalidade": "receber notificações de faltas por e-mail", "beneficio": "acompanhar a frequência",
+                    "fontes": [{"trecho_id": notify, "afirmacoes_sustentadas": ["funcionalidade"],
+                                "citacao": " ".join(new[notify].split()[:5])}]}] if notify else []
+    return {"impactos_identificados": impacts, "novas_historias_propostas": new_stories,
+            "conflitos_identificados": [], "historias_nao_afetadas": unaffected}
 
 
 def default_split_criteria(prompt: str) -> dict[str, Any]:
@@ -151,7 +175,7 @@ class FakeLLM:
             "AVALIACAO_QUS_INDIVIDUAL": default_individual,
             "AVALIACAO_QUS_CONJUNTO": default_set,
             "PERGUNTAS_FOLLOWUP": default_questions,
-            "ANALISE_IMPACTO": default_impact,
+            "ANALISE_IMPACTO_FONTES": default_impact_sources,
             "CRITERIOS_DIVISAO": default_split_criteria,
         }
         self.calls: list[tuple[str, str]] = []

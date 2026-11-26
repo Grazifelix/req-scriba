@@ -27,7 +27,7 @@ from app.services.analysis import analysis_text, approved_analysis, functionalit
 from app.domain.traceability import CRITERIA_ELEMENT, criteria_report, story_report
 from app.llm import prompts
 from app.services.candidates import (
-    DUPLICATE_THRESHOLD, EXISTING_DUPLICATE_THRESHOLD, deduplicate, extract_batch_result, extract_candidates, story_key,
+    DUPLICATE_THRESHOLD, EXISTING_DUPLICATE_THRESHOLD, deduplicate, extract_batch_result, story_key,
 )
 from app.services.criteria import (
     CriteriaOutcome, CriteriaTarget, apply_to_candidate, evidence_chunks, generate_criteria, related_for,
@@ -47,7 +47,7 @@ logger = logging.getLogger(__name__)
 
 __all__ = [
     "DUPLICATE_THRESHOLD", "EXISTING_DUPLICATE_THRESHOLD", "batch_budget", "build_batches", "deduplicate",
-    "drop_existing", "extract_candidates", "fits_in_one_call", "run_generation", "start_generation", "story_key",
+    "drop_existing", "fits_in_one_call", "run_generation", "start_generation", "story_key",
 ]
 
 

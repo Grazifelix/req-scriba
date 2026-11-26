@@ -16,7 +16,12 @@ NEW_ITEM_TYPES = "'funcionalidade', 'termo', 'fora_de_escopo'"
 NEW_COLUMNS = (
     ("evidencias", "afirmacoes_sustentadas", "TEXT NOT NULL DEFAULT '[]'"),
     ("versoes_historia", "criterio_ids", "TEXT NOT NULL DEFAULT '[]'"),
+    ("sugestoes_atualizacao", "versao_base", "INTEGER"),
+    ("sugestoes_atualizacao", "detalhes", "TEXT NOT NULL DEFAULT '{}'"),
 )
+OLD_SUGGESTION_TYPES = "'complementa', 'contradiz', 'novo_requisito')"
+NEW_SUGGESTION_TYPES = ("'complementa', 'contradiz', 'novo_requisito', 'confirmacao', 'complementacao', 'modificacao', "
+                        "'contradicao', 'nova_necessidade')")
 CRITERIA_MIGRATION = "criterios_tabela_v1"
 CRITERION_EXTRAS = ("dado", "quando", "entao")
 
@@ -24,6 +29,8 @@ CRITERION_EXTRAS = ("dado", "quando", "entao")
 def _migrate(conn: sqlite3.Connection) -> None:
     """Ajustes de bancos criados por versões anteriores do schema (idempotente)."""
     _migrate_item_types(conn)
+    _recreate_with_new_check(conn, "sugestoes_atualizacao", OLD_SUGGESTION_TYPES, NEW_SUGGESTION_TYPES,
+                             "CREATE INDEX IF NOT EXISTS ix_sugestoes_projeto ON sugestoes_atualizacao(projeto_id, status)")
     for table, column, ddl in NEW_COLUMNS:
         columns = {r[1] for r in conn.execute(f"PRAGMA table_info({table})")}
         if column not in columns:
@@ -79,6 +86,27 @@ def _insert_legacy_criterion(conn: sqlite3.Connection, story_id: int, version: i
          origin, version, updated, updated),
     )
     return int(cur.lastrowid)
+
+
+def _recreate_with_new_check(conn: sqlite3.Connection, table: str, old: str, new: str, index_ddl: str) -> None:
+    """Recria ``table`` trocando o trecho ``old`` do DDL (um CHECK) por ``new`` e copia os dados (idempotente)."""
+    row = conn.execute("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?", (table,)).fetchone()
+    if not row or old not in row[0]:
+        return
+    ddl = row[0].replace(old, new).replace(table, f"{table}_nova", 1)
+    conn.execute("PRAGMA foreign_keys = OFF")
+    try:
+        conn.executescript(f"""
+            BEGIN;
+            {ddl};
+            INSERT INTO {table}_nova SELECT * FROM {table};
+            DROP TABLE {table};
+            ALTER TABLE {table}_nova RENAME TO {table};
+            {index_ddl};
+            COMMIT;
+        """)
+    finally:
+        conn.execute("PRAGMA foreign_keys = ON")
 
 
 def _migrate_item_types(conn: sqlite3.Connection) -> None:

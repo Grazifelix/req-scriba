@@ -74,7 +74,9 @@ Comando: `make test` (equivale a `pytest -q`). Os testes de API e de Chroma usam
 16. Validação estrutural detecta trecho inexistente, citação divergente, ids duplicados, referências inválidas, campos obrigatórios e vínculos quebrados das versões, sem LLM.
 17. Auditoria semântica avalia cada componente e cada critério só pelos seus trechos; o código decide `SEM_EVIDENCIA` e nunca aceita como `COMPATIVEL` um item não avaliado ou com valor desconhecido; a HU não muda; a revisão humana fica registrada.
 
-Cobertura: `tests/test_traceability.py` (Milestone 2), `tests/test_db_migration.py` (tabela de critérios), `tests/test_services_criteria.py` (pipeline, critérios, execução independente, API), `tests/test_llm_parsing.py`
+18. Novas fontes: só fontes não processadas entram (salvo `reprocessar`); nenhuma HU é alterada antes da aprovação; as cinco categorias geram propostas com versão atual e proposta, evidências novas, justificativa e critérios afetados; reclassificação pelo código; nova HU sem duplicar o backlog, com id temporário e código definitivo só ao aprovar.
+
+Cobertura: `tests/test_services_updates.py` e `tests/test_domain_impact.py` (Milestone 3), `tests/test_traceability.py` (Milestone 2), `tests/test_db_migration.py` (tabela de critérios), `tests/test_services_criteria.py` (pipeline, critérios, execução independente, API), `tests/test_llm_parsing.py`
 (fontes por afirmação, Dado/Quando/Então), `tests/test_llm_prompts.py` (templates versionados e contrato
 exemplo × schema) e `tests/test_integrations.py` (saída estruturada nos dois adaptadores).
 

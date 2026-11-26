@@ -213,7 +213,9 @@ CREATE TABLE IF NOT EXISTS sugestoes_atualizacao (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     projeto_id INTEGER NOT NULL REFERENCES projetos(id) ON DELETE CASCADE,
     historia_id INTEGER REFERENCES historias(id) ON DELETE CASCADE,
-    tipo TEXT NOT NULL CHECK (tipo IN ('complementa', 'contradiz', 'novo_requisito')),
+    -- confirmacao | complementacao | modificacao | contradicao | nova_necessidade (ANALISE_IMPACTO_FONTES);
+    -- complementa | contradiz | novo_requisito: sugestões gravadas antes do Milestone 3
+    tipo TEXT NOT NULL CHECK (tipo IN ('complementa', 'contradiz', 'novo_requisito', 'confirmacao', 'complementacao', 'modificacao', 'contradicao', 'nova_necessidade')),
     justificativa TEXT NOT NULL,
     conteudo_atual TEXT,
     conteudo_proposto TEXT NOT NULL,
@@ -227,7 +229,9 @@ CREATE TABLE IF NOT EXISTS sugestoes_atualizacao (
     historia_criada_id INTEGER,
     job_id TEXT,
     criado_em TEXT NOT NULL,
-    atualizado_em TEXT NOT NULL
+    atualizado_em TEXT NOT NULL,
+    versao_base INTEGER,
+    detalhes TEXT NOT NULL DEFAULT '{}'
 );
 CREATE INDEX IF NOT EXISTS ix_sugestoes_projeto ON sugestoes_atualizacao(projeto_id, status);
 

@@ -59,7 +59,7 @@ class QuestionRepository(BaseRepository):
 
 class UpdateSuggestionRepository(BaseRepository):
     table = "sugestoes_atualizacao"
-    json_columns = ("conteudo_atual", "conteudo_proposto", "evidencias", "fontes")
+    json_columns = ("conteudo_atual", "conteudo_proposto", "evidencias", "fontes", "detalhes")
 
     def list_by_project(self, project_id: int, status: str | None = None) -> list[dict[str, Any]]:
         if status:

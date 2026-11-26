@@ -119,3 +119,53 @@ def test_legacy_criteria_move_to_their_own_table(tmp_path):
         assert [r[0] for r in conn.execute("SELECT nome FROM migracoes")] == ["criterios_tabela_v1"]
     finally:
         conn.close()
+
+
+
+OLD_SUGGESTIONS_DDL = """
+DROP TABLE sugestoes_atualizacao;
+CREATE TABLE sugestoes_atualizacao (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    projeto_id INTEGER NOT NULL REFERENCES projetos(id) ON DELETE CASCADE,
+    historia_id INTEGER REFERENCES historias(id) ON DELETE CASCADE,
+    tipo TEXT NOT NULL CHECK (tipo IN ('complementa', 'contradiz', 'novo_requisito')),
+    justificativa TEXT NOT NULL,
+    conteudo_atual TEXT,
+    conteudo_proposto TEXT NOT NULL,
+    evidencias TEXT NOT NULL DEFAULT '[]',
+    fontes TEXT NOT NULL DEFAULT '[]',
+    status TEXT NOT NULL,
+    editada INTEGER NOT NULL DEFAULT 0,
+    decidido_por TEXT,
+    decidido_em TEXT,
+    versao_aplicada INTEGER,
+    historia_criada_id INTEGER,
+    job_id TEXT,
+    criado_em TEXT NOT NULL,
+    atualizado_em TEXT NOT NULL
+);
+INSERT INTO sugestoes_atualizacao (projeto_id, historia_id, tipo, justificativa, conteudo_proposto, status,
+                                   criado_em, atualizado_em)
+VALUES (1, 1, 'contradiz', 'antiga', '{}', 'pendente', 'x', 'x');
+"""
+
+
+def test_old_suggestion_check_accepts_new_impact_categories(tmp_path):
+    path = tmp_path / "sugestoes.db"
+    legacy_database(path)
+    conn = sqlite3.connect(path)
+    conn.executescript(OLD_SUGGESTIONS_DDL)
+    conn.close()
+    database = Database(path)
+    database.initialize()
+    database.initialize()
+    conn = database.connect()
+    try:
+        conn.execute("INSERT INTO sugestoes_atualizacao (projeto_id, tipo, justificativa, conteudo_proposto, status, "
+                     "criado_em, atualizado_em) VALUES (1, 'nova_necessidade', 'nova', '{}', 'pendente', 'x', 'x')")
+        rows = conn.execute("SELECT tipo, detalhes, versao_base FROM sugestoes_atualizacao ORDER BY id").fetchall()
+        assert [tuple(r) for r in rows] == [("contradiz", "{}", None), ("nova_necessidade", "{}", None)]
+        assert conn.execute("PRAGMA foreign_key_check").fetchall() == []
+    finally:
+        conn.close()
+

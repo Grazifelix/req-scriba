@@ -254,6 +254,8 @@ def suggestion(sg: dict, s: dict | None, with_comparison: bool = True) -> dict:
         "decidido_por": sg["decidido_por"], "decidido_em": sg["decidido_em"],
         "versao_aplicada": sg["versao_aplicada"], "historia_criada_id": sg["historia_criada_id"],
         "job_id": sg["job_id"], "criado_em": sg["criado_em"], "atualizado_em": sg["atualizado_em"],
+        "versao_base": sg.get("versao_base"), "versao_atual_historia": s["versao_atual"] if s else None,
+        "detalhes": sg.get("detalhes") or {},
     }
     if with_comparison:
         data["comparacao"] = comparison(sg["conteudo_atual"], sg["conteudo_proposto"])

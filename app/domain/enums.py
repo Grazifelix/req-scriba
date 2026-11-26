@@ -41,9 +41,17 @@ class SuggestionStatus(LabeledEnum):
 
 
 class SuggestionType(LabeledEnum):
+    """Categorias de impacto de novas fontes (ANALISE_IMPACTO_FONTES). Os três primeiros valores são das
+    sugestões gravadas antes do Milestone 3 e continuam válidos para leitura e decisão."""
+
     COMPLEMENTS = "complementa"
     CONTRADICTS = "contradiz"
     NEW_REQUIREMENT = "novo_requisito"
+    CONFIRMATION = "confirmacao"
+    COMPLEMENTATION = "complementacao"
+    MODIFICATION = "modificacao"
+    CONTRADICTION = "contradicao"
+    NEW_NEED = "nova_necessidade"
 
 
 class JobStatus(LabeledEnum):
@@ -116,6 +124,11 @@ LABELS: dict[Enum, str] = {
     SuggestionType.COMPLEMENTS: "Complementa história existente",
     SuggestionType.CONTRADICTS: "Contradiz história existente",
     SuggestionType.NEW_REQUIREMENT: "Possível novo requisito",
+    SuggestionType.CONFIRMATION: "Confirmação: nova fonte reafirma a história",
+    SuggestionType.COMPLEMENTATION: "Complementação: nova informação para a história",
+    SuggestionType.MODIFICATION: "Modificação: alteração proposta na história",
+    SuggestionType.CONTRADICTION: "Contradição: fontes incompatíveis",
+    SuggestionType.NEW_NEED: "Nova necessidade: história candidata",
     JobStatus.PENDING: "Na fila",
     JobStatus.PROCESSING: "Em processamento",
     JobStatus.COMPLETED: "Concluído",

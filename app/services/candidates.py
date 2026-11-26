@@ -115,16 +115,6 @@ def extract_batch_result(
     return {"historias": stories, "lacunas": result["lacunas"], "cobertura": result["cobertura"]}
 
 
-def extract_candidates(
-    container: Container, batch: list[dict], context: MeetingContext | None = None, analysis_text: str | None = None
-) -> list[dict]:
-    """Somente as candidatas de um lote (análise de novas fontes), sem a ligação com as funcionalidades."""
-    candidates = extract_batch(container, batch, context, analysis_text)
-    for candidate in candidates:
-        candidate.pop("funcionalidade_ref", None)
-    return candidates
-
-
 def merge_candidates(target: dict, other: dict) -> None:
     """Mescla ``other`` em ``target``: une evidências, critérios e funcionalidades e preenche perfil/benefício vazios."""
     seen = {e["trecho_id"] for e in target["evidencias"]}
