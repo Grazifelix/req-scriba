@@ -18,7 +18,7 @@ por HTTP: veja o [guia de integração](docs/ux-guidelines.md#8-integração-do-
 | LLM | Configurável (Ollama ou API compatível com OpenAI). Padrão: Llama 4 Scout no Ollama |
 | Embeddings | Configurável. Padrão: `bge-m3` no Ollama |
 | Chunking | Divisão recursiva por fronteiras estruturais (docs) · janelas de segmentos (transcrições) |
-| Transcrição | faster-whisper (opcional) |
+| Transcrição | faster-whisper (opcional): local ou em servidor remoto com GPU |
 | Documentos | pypdf · python-docx · TXT/MD |
 
 ## Funcionalidades
@@ -119,6 +119,24 @@ em `GET {base}/models`. Confira o resultado em `GET /api/v1/health`.
   aprovada; a geração de HU usa a análise aprovada no lugar dela.
 - **Modelos com *thinking*:** prefira o provedor `ollama` para modelos do Ollama. Só ele envia `think: false`,
   e o `qwen3.5:4b` não respondeu em 240 s pela API `/v1`, contra 36 s pela API nativa.
+
+## Transcrição em servidor remoto (GPU)
+
+Por padrão, o `faster-whisper` roda dentro da API, na sua máquina. Para usar um modelo maior (ex.: `large-v3`)
+numa máquina com GPU, acessada por túnel SSH como o Ollama, suba lá o servidor mínimo de
+[`req-scriba-asr`](../req-scriba-asr/README.md) (repositório separado, instalação sem root) e configure:
+
+```bash
+REQSCRIBA_TRANSCRIPTION_PROVIDER=openai_compatible
+REQSCRIBA_TRANSCRIPTION_BASE_URL=http://localhost:9001/v1   # porta local do túnel
+REQSCRIBA_WHISPER_MODEL=large-v3
+```
+
+O backend continua local; o servidor só recebe o áudio, devolve os segmentos e não guarda nada. Qualquer
+serviço com a rota `/v1/audio/transcriptions` da OpenAI (formato `verbose_json`) também funciona
+(`REQSCRIBA_TRANSCRIPTION_API_KEY` se exigir chave). Confira em `GET /api/v1/health`
+(`componentes.transcricao`). Excluir um áudio durante a transcrição remota descarta o resultado quando a
+resposta chega (não interrompe o servidor).
 
 ## Como testar
 

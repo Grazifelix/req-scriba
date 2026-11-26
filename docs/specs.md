@@ -40,7 +40,7 @@ reqscriba/
 │   │   ├── openai_compatible.py  # OpenAICompatibleClient: servidores compatíveis com a API da OpenAI
 │   │   ├── embeddings.py         # RemoteEmbedder (em lotes), HashEmbedder (testes/dev offline)
 │   │   ├── vector_store.py       # ChromaVectorStore, InMemoryVectorStore
-│   │   ├── transcriber.py        # FasterWhisperTranscriber
+│   │   ├── transcriber.py        # FasterWhisperTranscriber (local) e RemoteTranscriber (HTTP)
 │   │   ├── extractors.py         # PDF/DOCX/TXT/MD → páginas de texto
 │   │   └── storage.py            # FileStorage (uploads em disco, nomes saneados)
 │   ├── llm/
@@ -410,7 +410,10 @@ Fakes: `FakeLLM` (roteia pelo marcador `### TAREFA:` do prompt), `FakeTranscribe
 | `REQSCRIBA_EMBEDDING_MODEL` | `bge-m3` |
 | `REQSCRIBA_EMBEDDINGS_BASE_URL` / `REQSCRIBA_EMBEDDINGS_API_KEY` | vazios; sem URL própria e com o mesmo provedor, herdam URL e chave do LLM |
 | `REQSCRIBA_VECTOR_STORE` | `chroma` (`memory` para testes) |
-| `REQSCRIBA_WHISPER_MODEL` / `_DEVICE` / `_COMPUTE_TYPE` | `small` / `cpu` / `int8` |
+| `REQSCRIBA_TRANSCRIPTION_PROVIDER` | `faster_whisper` (local) ou `openai_compatible` (servidor HTTP, ex.: repositório `req-scriba-asr`) |
+| `REQSCRIBA_TRANSCRIPTION_BASE_URL` / `REQSCRIBA_TRANSCRIPTION_API_KEY` | vazios; URL obrigatória em `openai_compatible` (ex.: `http://localhost:9001/v1`) |
+| `REQSCRIBA_TRANSCRIPTION_TIMEOUT` | `1800` (segundos, só no remoto) |
+| `REQSCRIBA_WHISPER_MODEL` / `_DEVICE` / `_COMPUTE_TYPE` | `small` / `cpu` / `int8` (no remoto, só o modelo vale: nome listado pelo servidor) |
 | `REQSCRIBA_TRANSCRIPTION_LANGUAGE` | `pt` |
 | `REQSCRIBA_MAX_AUDIO_MB` / `REQSCRIBA_MAX_DOCUMENT_MB` | `500` / `20` |
 | `REQSCRIBA_CHUNK_SIZE` / `REQSCRIBA_CHUNK_OVERLAP` | `1000` / `150` |

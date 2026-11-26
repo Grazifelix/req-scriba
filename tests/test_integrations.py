@@ -5,13 +5,14 @@ import pytest
 import requests
 
 from app.core.config import Settings
-from app.core.container import build_embedder, build_llm, embedding_fingerprint
+from app.core.container import build_embedder, build_llm, build_transcriber, embedding_fingerprint
 from app.core.errors import BusinessValidationError, ExternalServiceError
 from app.integrations.embeddings import HashEmbedder
 from app.integrations.extractors import extract_pages, normalize_whitespace
 from app.integrations.ollama import OllamaClient
 from app.integrations.openai_compatible import OpenAICompatibleClient
 from app.integrations.storage import AUDIO_EXTENSIONS, DOCUMENT_EXTENSIONS, FileStorage, sanitize_filename
+from app.integrations.transcriber import FasterWhisperTranscriber, RemoteTranscriber, TranscriptionCancelled
 from app.integrations.vector_store import InMemoryVectorStore, build_where, collection_name
 
 
@@ -32,8 +33,9 @@ class FakeSession:
         self.responses = list(responses)
         self.posts = []
 
-    def post(self, url, json, timeout):
+    def post(self, url, timeout, json=None, **kwargs):
         self.posts.append((url, json))
+        self.post_kwargs = kwargs
         item = self.responses.pop(0)
         if isinstance(item, Exception):
             raise item
@@ -184,6 +186,7 @@ def settings_for(**values):
     defaults = {
         "llm_provider": "ollama", "llm_base_url": "", "llm_api_key": "", "embeddings_provider": "ollama",
         "embeddings_base_url": "", "embeddings_api_key": "", "ollama_url": "http://localhost:11434",
+        "transcription_provider": "faster_whisper", "transcription_base_url": "", "transcription_api_key": "",
     }
     return Settings(**{**defaults, **values})
 
@@ -238,6 +241,106 @@ def test_remote_provider_logs_warning_and_local_does_not(caplog):
 
 def test_settings_repr_hides_api_keys():
     assert API_KEY not in repr(settings_for(llm_api_key=API_KEY, embeddings_api_key=API_KEY))
+
+
+# -- Transcrição remota -----------------------------------------------------
+def remote_transcriber(responses, api_key="", language="pt"):
+    session = FakeSession(responses)
+    session.headers = {}
+    return RemoteTranscriber("http://localhost:9001/v1/", "large-v3", language, api_key=api_key, session=session)
+
+
+def audio_file(tmp_path: Path) -> Path:
+    path = tmp_path / "reuniao.mp3"
+    path.write_bytes(b"audio")
+    return path
+
+
+VERBOSE = {
+    "language": "pt", "duration": 12.5,
+    "segments": [{"start": 0, "end": 4.2, "text": " Olá "}, {"start": 4.2, "end": 5, "text": "  "},
+                 {"start": 5, "end": 12.5, "text": "Precisamos de relatórios."}],
+}
+
+
+def test_remote_transcriber_sends_multipart_and_parses_segments(tmp_path: Path):
+    t = remote_transcriber([FakeResponse(VERBOSE)])
+    result = t.transcribe(audio_file(tmp_path))
+    url, payload = t.session.posts[0]
+    assert url == "http://localhost:9001/v1/audio/transcriptions" and payload is None
+    fields = t.session.post_kwargs["data"]
+    assert fields["model"] == "large-v3" and fields["language"] == "pt" and fields["response_format"] == "verbose_json"
+    assert t.session.post_kwargs["files"]["file"][0] == "reuniao.mp3"
+    assert [s.text for s in result.segments] == ["Olá", "Precisamos de relatórios."]
+    assert result.duration_seconds == 12.5 and result.language == "pt" and result.segments[1].end == 12.5
+    assert "Authorization" not in t.session.headers
+
+
+def test_remote_transcriber_omits_language_when_unset_and_sends_bearer(tmp_path: Path):
+    t = remote_transcriber([FakeResponse(VERBOSE)], api_key=API_KEY, language=None)
+    t.transcribe(audio_file(tmp_path))
+    assert "language" not in t.session.post_kwargs["data"]
+    assert t.session.headers["Authorization"] == f"Bearer {API_KEY}"
+
+
+@pytest.mark.parametrize("failure, message", [
+    (requests.Timeout(), "Tempo esgotado"),
+    (requests.ConnectionError(), "Não foi possível conectar"),
+    (FakeResponse({}, status=500, text=f"boom {API_KEY}"), "HTTP 500"),
+    (FakeResponse({"text": "sem segmentos"}), "Resposta de transcrição inválida"),
+    (FakeResponse({"segments": [{"text": "sem tempos"}]}), "Resposta de transcrição inválida"),
+])
+def test_remote_transcriber_failures_become_external_errors(tmp_path: Path, failure, message):
+    with pytest.raises(ExternalServiceError, match=message) as exc:
+        remote_transcriber([failure], api_key=API_KEY).transcribe(audio_file(tmp_path))
+    assert API_KEY not in str(exc.value.to_dict())
+
+
+def test_remote_transcriber_checks_cancellation_before_and_after_the_call(tmp_path: Path):
+    t = remote_transcriber([])
+    with pytest.raises(TranscriptionCancelled):
+        t.transcribe(audio_file(tmp_path), should_cancel=lambda: True)
+    assert t.session.posts == []  # nada foi enviado
+    calls = iter([False, True])
+    t = remote_transcriber([FakeResponse(VERBOSE)])
+    with pytest.raises(TranscriptionCancelled):
+        t.transcribe(audio_file(tmp_path), should_cancel=lambda: next(calls))
+
+
+def test_remote_transcriber_health_reports_model_and_unavailability():
+    models = {"data": [{"id": "large-v3"}]}
+    health = remote_transcriber([FakeResponse(models)]).health()
+    assert health["status"] == "ok" and health["modelo"] == "large-v3"
+    assert remote_transcriber([FakeResponse({"data": [{"id": "small"}]})]).health()["status"] == "modelos_ausentes"
+    assert remote_transcriber([FakeResponse({}, status=502)]).health()["status"] == "indisponivel"
+
+
+def test_transcriber_provider_selection(caplog):
+    assert isinstance(build_transcriber(settings_for()), FasterWhisperTranscriber)
+    with caplog.at_level("WARNING"):
+        local = build_transcriber(settings_for(
+            transcription_provider="openai_compatible", transcription_base_url="http://localhost:9001/v1",
+            whisper_model="large-v3",
+        ))
+        assert "fora desta máquina" not in caplog.text
+        build_transcriber(settings_for(
+            transcription_provider="openai_compatible", transcription_base_url="https://asr.example/v1",
+        ))
+    assert isinstance(local, RemoteTranscriber) and local.model == "large-v3"
+    assert "asr.example" in caplog.text
+
+
+@pytest.mark.parametrize("values", [
+    {"transcription_provider": "whisper"},
+    {"transcription_provider": "openai_compatible"},
+])
+def test_invalid_transcription_configuration_fails_with_clear_message(values):
+    with pytest.raises(ValueError, match="REQSCRIBA_TRANSCRIPTION_"):
+        build_transcriber(settings_for(**values))
+
+
+def test_settings_repr_hides_transcription_api_key():
+    assert API_KEY not in repr(settings_for(transcription_api_key=API_KEY))
 
 
 def test_embedding_fingerprint_separates_models():

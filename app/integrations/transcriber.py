@@ -8,9 +8,15 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Protocol
 
+import requests
+
 from app.core.errors import ExternalServiceError
+from app.integrations.llm import check_model, request_json
 
 logger = logging.getLogger(__name__)
+
+REMOTE_PROVIDER = "openai_compatible"
+REMOTE_LABEL = "servidor de transcrição"
 
 INSTALL_HINT = (
     "Mecanismo de transcrição indisponível: instale o faster-whisper "
@@ -117,3 +123,68 @@ class FasterWhisperTranscriber:
         except ImportError:
             return {"status": "indisponivel", "detalhe": INSTALL_HINT}
         return {"status": "ok", "modelo": self.model_size, "carregado": self._model is not None}
+
+
+class RemoteTranscriber:
+    """Transcrição num servidor HTTP com a rota `/audio/transcriptions` da OpenAI (D36).
+
+    Serve para o servidor próprio do repositório `req-scriba-asr` (ex.: GPU remota via túnel SSH) ou
+    qualquer serviço compatível. A chamada é única: o cancelamento é verificado antes do envio e
+    depois da resposta.
+    """
+
+    def __init__(
+        self,
+        base_url: str,
+        model: str,
+        language: str | None,
+        api_key: str = "",
+        timeout: int = 1800,
+        session: requests.Session | None = None,
+    ) -> None:
+        self.base_url = base_url.rstrip("/")
+        self.model = model
+        self.language = language
+        self.api_key = api_key
+        self.timeout = timeout
+        self.session = session or requests.Session()
+        if api_key:
+            self.session.headers["Authorization"] = f"Bearer {api_key}"
+
+    def transcribe(self, path: Path, should_cancel: CancelCheck | None = None) -> TranscriptionResult:
+        check_cancelled(should_cancel)
+        fields = {"model": self.model, "response_format": "verbose_json", "timestamp_granularities[]": "segment"}
+        if self.language:
+            fields["language"] = self.language
+        started = time.perf_counter()
+        with path.open("rb") as audio:
+            data = request_json(
+                self.session, f"{self.base_url}/audio/transcriptions", self.timeout, REMOTE_LABEL,
+                secret=self.api_key, data=fields, files={"file": (path.name, audio)},
+            )
+        check_cancelled(should_cancel)
+        segments = _parse_segments(data)
+        logger.info(
+            "Transcrição remota (%s) concluída em %.1fs (%d segmentos)",
+            self.model, time.perf_counter() - started, len(segments),
+        )
+        return TranscriptionResult(data.get("duration"), data.get("language"), segments)
+
+    def _list_models(self) -> list[str]:
+        response = self.session.get(f"{self.base_url}/models", timeout=5)
+        response.raise_for_status()
+        return [m.get("id", "") for m in response.json().get("data", [])]
+
+    def health(self) -> dict[str, Any]:
+        return check_model(REMOTE_PROVIDER, self.model, self._list_models)
+
+
+def _parse_segments(data: dict[str, Any]) -> list[TranscribedSegment]:
+    try:
+        return [
+            TranscribedSegment(float(s["start"]), float(s["end"]), s["text"].strip())
+            for s in data["segments"]
+            if (s.get("text") or "").strip()
+        ]
+    except (KeyError, TypeError, ValueError, AttributeError) as exc:
+        raise ExternalServiceError(f"Resposta de transcrição inválida do {REMOTE_LABEL}.") from exc

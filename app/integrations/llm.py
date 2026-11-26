@@ -51,8 +51,20 @@ def post_json(
     secret: str | None = None,
 ) -> dict[str, Any]:
     """POST JSON que converte falhas em ExternalServiceError, sem expor `secret` nos detalhes."""
+    return request_json(session, url, timeout, provider, secret, json=payload)
+
+
+def request_json(
+    session: requests.Session,
+    url: str,
+    timeout: int,
+    provider: str,
+    secret: str | None = None,
+    **kwargs: Any,
+) -> dict[str, Any]:
+    """POST com corpo livre (`json=`, `data=`/`files=`) e resposta JSON, com o tratamento de `post_json`."""
     try:
-        response = session.post(url, json=payload, timeout=timeout)
+        response = session.post(url, timeout=timeout, **kwargs)
     except requests.Timeout as exc:
         raise ExternalServiceError(f"Tempo esgotado ao chamar {provider} ({url}).") from exc
     except requests.RequestException as exc:

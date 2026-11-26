@@ -17,7 +17,7 @@ from app.integrations.llm import LLMClient, is_local_url
 from app.integrations.ollama import OllamaClient
 from app.integrations.openai_compatible import OpenAICompatibleClient
 from app.integrations.storage import FileStorage
-from app.integrations.transcriber import FasterWhisperTranscriber, Transcriber
+from app.integrations.transcriber import FasterWhisperTranscriber, RemoteTranscriber, Transcriber
 from app.integrations.vector_store import ChromaVectorStore, InMemoryVectorStore, VectorStore, collection_name
 
 logger = logging.getLogger(__name__)
@@ -25,6 +25,7 @@ logger = logging.getLogger(__name__)
 HASH_PROVIDER = "hash"
 OLLAMA_PROVIDER = "ollama"
 OPENAI_COMPATIBLE_PROVIDER = "openai_compatible"
+FASTER_WHISPER_PROVIDER = "faster_whisper"
 
 
 @dataclass
@@ -90,6 +91,27 @@ def build_embedder(settings: Settings) -> Embedder:
     return RemoteEmbedder(client)
 
 
+def build_transcriber(settings: Settings) -> Transcriber:
+    provider, language = settings.transcription_provider, settings.transcription_language or None
+    if provider == FASTER_WHISPER_PROVIDER:
+        return FasterWhisperTranscriber(
+            settings.whisper_model, settings.whisper_device, settings.whisper_compute_type, language
+        )
+    if provider == OPENAI_COMPATIBLE_PROVIDER:
+        if not settings.transcription_base_url:
+            raise ValueError(f"O provedor {provider} exige a variável REQSCRIBA_TRANSCRIPTION_BASE_URL.")
+        transcriber = RemoteTranscriber(
+            settings.transcription_base_url, settings.whisper_model, language,
+            api_key=settings.transcription_api_key, timeout=settings.transcription_timeout,
+        )
+        _warn_if_remote("A transcrição", transcriber.base_url)
+        return transcriber
+    raise ValueError(
+        f"Provedor '{provider}' desconhecido em REQSCRIBA_TRANSCRIPTION_PROVIDER. "
+        f"Use {FASTER_WHISPER_PROVIDER} ou {OPENAI_COMPATIBLE_PROVIDER}."
+    )
+
+
 def embedding_fingerprint(settings: Settings) -> str:
     """Identifica o espaço vetorial em uso, separando os índices de modelos diferentes."""
     return HASH_PROVIDER if settings.embeddings_provider == HASH_PROVIDER else settings.embedding_model
@@ -104,12 +126,7 @@ def build_container(settings: Settings) -> Container:
         if settings.vector_store == "memory"
         else ChromaVectorStore(settings.chroma_dir, collection_name(embedding_fingerprint(settings)))
     )
-    transcriber = FasterWhisperTranscriber(
-        settings.whisper_model,
-        settings.whisper_device,
-        settings.whisper_compute_type,
-        settings.transcription_language or None,
-    )
+    transcriber = build_transcriber(settings)
     logger.info("Container pronto (dados em %s)", settings.data_dir.resolve())
     return Container(
         settings, db, FileStorage(settings.upload_dir), build_llm(settings), build_embedder(settings),
