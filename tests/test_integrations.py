@@ -467,3 +467,31 @@ def test_chroma_keeps_embedding_models_in_separate_collections(tmp_path: Path):
     assert second.health()["vetores"] == 0
     second.upsert(["trecho-1"], ["boletim"], [[1.0, 0.0, 0.0]], [{"projeto_id": 1}])  # outra dimensão
     assert first.health()["vetores"] == 1 and second.health()["vetores"] == 1
+
+
+# -- Saída estruturada (JSON Schema) ----------------------------------------
+SCHEMA = {"title": "GERACAO_US_QUS", "type": "object", "properties": {"historias": {"type": "array"}}}
+
+
+def test_ollama_sends_schema_only_when_structured_output_is_enabled():
+    c = client([FakeResponse({"message": {"content": "{}"}}), FakeResponse({"message": {"content": "{}"}})])
+    c.generate_json("sys", "prompt", schema=SCHEMA)
+    assert c.session.posts[0][1]["format"] == "json"
+    c.structured_output = True
+    c.generate_json("sys", "prompt", schema=SCHEMA)
+    assert c.session.posts[1][1]["format"] == SCHEMA
+
+
+def test_compatible_sends_json_schema_response_format_when_enabled():
+    c = compatible_client([chat_response("{}"), chat_response("{}")])
+    c.generate_json("sys", "prompt", schema=SCHEMA)
+    assert c.session.posts[0][1]["response_format"] == {"type": "json_object"}
+    c.structured_output = True
+    c.generate_json("sys", "prompt", schema=SCHEMA)
+    assert c.session.posts[1][1]["response_format"] == {
+        "type": "json_schema", "json_schema": {"name": "geracao_us_qus", "schema": SCHEMA}}
+
+
+def test_build_llm_passes_structured_output_setting(tmp_path):
+    settings = Settings(data_dir=tmp_path, llm_structured_output=True)
+    assert build_llm(settings).structured_output is True

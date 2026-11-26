@@ -91,7 +91,7 @@ def create_app(container: Container | None = None, settings: Settings | None = N
             {"name": "Saúde"}, {"name": "Projetos"}, {"name": "Áudios"}, {"name": "Transcrição"},
             {"name": "Documentos"}, {"name": "Busca"}, {"name": "Análises"}, {"name": "Histórias de Usuário"},
             {"name": "Rastreabilidade"}, {"name": "Versões"}, {"name": "Qualidade"}, {"name": "Follow-up"},
-            {"name": "Atualizações"}, {"name": "Jobs"},
+            {"name": "Critérios de aceitação"}, {"name": "Atualizações"}, {"name": "Jobs"},
         ],
     )
     if container is not None:

@@ -27,6 +27,36 @@ def default_extraction(prompt: str) -> dict[str, Any]:
     ]}
 
 
+def source_texts(prompt: str) -> dict[str, str]:
+    """Rótulo F → texto do trecho, lidos do bloco <fontes> do prompt."""
+    block = prompt.split("<fontes>")[1].split("</fontes>")[0]
+    parts = re.split(r"^\[(F\d+)\] \(.*?\)\n", block, flags=re.M)
+    return {label: text.strip() for label, text in zip(parts[1::2], parts[2::2])}
+
+
+def default_criteria(prompt: str) -> dict[str, Any]:
+    """Dois critérios por história, citando literalmente a primeira evidência vinculada; sem evidência,
+    nenhum critério e a lacuna registrada (como o prompt pede)."""
+    texts = source_texts(prompt)
+    result = []
+    for ref, labels in re.findall(r"^\[(H\d+)\] [^\n]*\n[^\n]*\nEvidências vinculadas: ([^\n]*)$", prompt, flags=re.M):
+        cited = [label.strip() for label in labels.split(",") if label.strip() in texts]
+        if not cited:
+            result.append({"id": ref, "criterios_aceitacao": [],
+                           "lacunas_criterios": [{"elemento": "regras", "descricao": "Sem evidência para critérios."}]})
+            continue
+        quote = " ".join(texts[cited[0]].split()[:5])
+        result.append({"id": ref, "criterios_aceitacao": [
+            {"id": f"{ref}-CA1", "titulo": "Resultado principal", "dado": "o usuário autorizado",
+             "quando": "ele executa a funcionalidade", "entao": "o sistema registra o resultado",
+             "fontes": [{"trecho_id": cited[0], "afirmacoes_sustentadas": ["entao"], "citacao": quote}]},
+            {"id": f"{ref}-CA2", "titulo": "Condição documentada", "dado": "a condição descrita na fonte",
+             "quando": "o usuário confirma", "entao": "o sistema aplica a regra",
+             "fontes": [{"trecho_id": cited[0], "afirmacoes_sustentadas": ["dado"], "citacao": quote}]},
+        ], "lacunas_criterios": []})
+    return {"historias": result, "lacunas_conjunto": []}
+
+
 def default_analysis(prompt: str) -> dict[str, Any]:
     return {"analise": {
         "sistema": "Sistema escolar de boletins",
@@ -93,7 +123,8 @@ class FakeLLM:
             "CONTEXTO_REUNIAO": default_context,
             "ANALISE_FONTES": default_analysis,
             "CONSOLIDACAO_HISTORIAS": default_consolidation,
-            "EXTRACAO_HISTORIAS": default_extraction,
+            "GERACAO_US_QUS": default_extraction,
+            "GERACAO_CRITERIOS_ACEITACAO": default_criteria,
             "AVALIACAO_QUS_INDIVIDUAL": default_individual,
             "AVALIACAO_QUS_CONJUNTO": default_set,
             "PERGUNTAS_FOLLOWUP": default_questions,
@@ -101,11 +132,13 @@ class FakeLLM:
             "CRITERIOS_DIVISAO": default_split_criteria,
         }
         self.calls: list[tuple[str, str]] = []
+        self.schemas: dict[str, dict[str, Any] | None] = {}
         self.fail = False
 
-    def generate_json(self, system: str, prompt: str) -> dict[str, Any]:
+    def generate_json(self, system: str, prompt: str, schema: dict[str, Any] | None = None) -> dict[str, Any]:
         task = re.search(r"### TAREFA: (\w+)", prompt).group(1)
         self.calls.append((task, prompt))
+        self.schemas[task] = schema
         if self.fail:
             raise ExternalServiceError("LLM indisponível (simulado).")
         return self.handlers[task](prompt)

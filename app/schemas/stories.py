@@ -14,10 +14,22 @@ class AcceptanceCriterionIn(InputModel):
     criterio: LongText = Field(examples=["Dado que estou logado, quando clico em exportar, então recebo um PDF."])
 
 
+class CriterionSourceOut(OutputModel):
+    trecho_id: int = Field(description="Id permanente do trecho da fonte (trechos_fonte.id)")
+    afirmacoes_sustentadas: list[str] = Field(description="Partes do critério sustentadas: dado | quando | entao")
+
+
 class AcceptanceCriterionOut(OutputModel):
     id: str = Field(examples=["CA01"])
     titulo: str
-    criterio: str
+    criterio: str = Field(description="Texto completo 'Dado …, quando …, então …'")
+    dado: Optional[str] = Field(default=None, description="Presente nos critérios gerados pela IA")
+    quando: Optional[str] = None
+    entao: Optional[str] = None
+    fontes: list[CriterionSourceOut] = Field(default_factory=list, description="Trechos que sustentam o critério")
+    informacoes_ausentes: list[dict[str, Any]] = Field(default_factory=list)
+    afirmacoes_sem_evidencia: list[str] = Field(default_factory=list)
+    origem: Optional[str] = Field(default=None, description="'ia' quando gerado por GERACAO_CRITERIOS_ACEITACAO")
 
 
 class StoryCreate(InputModel):
@@ -52,6 +64,16 @@ class GenerationRequest(InputModel):
     documento_ids: list[int] = Field(default_factory=list, max_length=100)
     analise_id: Optional[int] = Field(
         default=None, description="Análise aprovada a usar; sem valor, usa a aprovada mais recente do projeto."
+    )
+
+
+class CriteriaGenerationRequest(InputModel):
+    historia_ids: list[int] = Field(
+        default_factory=list, max_length=500,
+        description="Histórias a processar; vazio = todas as ativas não aprovadas do projeto.",
+    )
+    substituir: bool = Field(
+        default=False, description="Também regera histórias que já têm critérios (a versão anterior é preservada)."
     )
 
 

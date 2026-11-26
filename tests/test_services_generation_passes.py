@@ -74,7 +74,7 @@ def test_generation_in_batches_skips_context_pass(container, project_id, audio_i
     assert job["status"] == "concluido" and job["resultado"]["modo"] == "lotes"
     assert "contexto" not in job["resultado"]
     assert not container.llm.prompts_for("CONTEXTO_REUNIAO")
-    for prompt in container.llm.prompts_for("EXTRACAO_HISTORIAS"):
+    for prompt in container.llm.prompts_for("GERACAO_US_QUS"):
         assert "CONTEXTO GERAL" not in prompt and "- boletim — relatório de notas" in prompt
 
 
@@ -122,7 +122,7 @@ def test_context_reduces_batch_budget(container, project_id, audio_id):
 # ---------- passada de consolidação ----------
 
 def test_consolidation_merges_fills_and_flags_conflicts(container, project_id, audio_id, document_id):
-    container.llm.handlers["EXTRACAO_HISTORIAS"] = widened_after_extraction(container, lambda p: {"historias": [
+    container.llm.handlers["GERACAO_US_QUS"] = widened_after_extraction(container, lambda p: {"historias": [
         story("emitir o boletim da turma", "coordenador", "acompanhar o desempenho dos alunos", ["F1"], ["Dado uma turma, quando o coordenador emitir, então o sistema gera o PDF do boletim"]),
         story("disponibilizar as notas bimestrais", "coordenador", None, ["F1"], ["Notas publicadas ficam visíveis aos responsáveis no portal"]),
         story("cadastrar novos alunos", "secretaria", None, ["F2"]),
@@ -149,7 +149,7 @@ def test_consolidation_merges_fills_and_flags_conflicts(container, project_id, a
 
 
 def test_consolidation_failure_keeps_candidates(container, project_id, audio_id):
-    container.llm.handlers["EXTRACAO_HISTORIAS"] = widened_after_extraction(container, default_extraction)
+    container.llm.handlers["GERACAO_US_QUS"] = widened_after_extraction(container, default_extraction)
     container.llm.handlers["CONSOLIDACAO_HISTORIAS"] = failing
     job = generate(container, project_id, [audio_id])
     assert job["status"] == "concluido" and job["resultado"]["total"] == 2
@@ -197,7 +197,7 @@ def analyze_new_sources(container, project_id):
     container.llm.handlers["CONTEXTO_REUNIAO"] = lambda p: {
         "perfis": [{"texto": "Responsáveis acompanham a frequência dos alunos.", "fontes": ["F1"]}],
     }
-    container.llm.handlers["EXTRACAO_HISTORIAS"] = widened_after_extraction(container, lambda p: {"historias": [
+    container.llm.handlers["GERACAO_US_QUS"] = widened_after_extraction(container, lambda p: {"historias": [
         story("receber notificações de faltas por e-mail", "responsável", "acompanhar a frequência"),
         story("ser avisado quando o filho faltar", "responsável", None),
     ]})
@@ -218,7 +218,7 @@ def analyze_new_sources(container, project_id):
 def test_new_requirements_use_approved_analysis_instead_of_context(container, project_id, existing_story):
     result = analyze_new_sources(container, project_id)
     assert result["contexto"] is None and not container.llm.prompts_for("CONTEXTO_REUNIAO")
-    prompt = container.llm.prompts_for("EXTRACAO_HISTORIAS")[-1]
+    prompt = container.llm.prompts_for("GERACAO_US_QUS")[-1]
     assert "ANALISE DO PROJETO:" in prompt and "CONTEXTO GERAL" not in prompt
 
 
@@ -228,4 +228,4 @@ def test_new_requirements_use_context_without_approved_analysis(container, proje
         AnalysisService(uow).update(analysis["id"], {"revisada": False}, "ana")
     result = analyze_new_sources(container, project_id)
     assert result["contexto"]["itens"] == 1
-    assert "[R1] (perfil)" in container.llm.prompts_for("EXTRACAO_HISTORIAS")[-1]
+    assert "[R1] (perfil)" in container.llm.prompts_for("GERACAO_US_QUS")[-1]

@@ -9,6 +9,7 @@ from app.core.errors import BusinessValidationError, NotFoundError
 from app.core.time import utc_now_iso
 from app.db.unit_of_work import UnitOfWork
 from app.domain import story_format
+from app.domain.text import normalize
 from app.domain.enums import ChangeOrigin, ChangeType, StoryStatus
 from app.llm import parsing, prompts
 from app.services import presenters
@@ -25,13 +26,34 @@ MISSING_CRITERIA = {
 }
 
 
+# Campos dos critérios gerados pela IA (GERACAO_CRITERIOS_ACEITACAO), preservados quando presentes.
+CRITERION_EXTRA_FIELDS = ("dado", "quando", "entao", "fontes", "informacoes_ausentes", "afirmacoes_sem_evidencia", "origem")
+
+
 def number_criteria(criteria: list[dict] | None) -> list[dict]:
-    """Atribui ids CA01, CA02… preservando título e texto."""
-    return [
-        {"id": f"CA{i:02d}", "titulo": (c.get("titulo") or f"Critério {i}").strip(), "criterio": c["criterio"].strip()}
-        for i, c in enumerate(criteria or [], start=1)
-        if (c.get("criterio") or "").strip()
-    ]
+    """Atribui ids CA01, CA02… preservando título, texto e os campos de rastreabilidade do critério."""
+    numbered = []
+    for c in criteria or []:
+        if not (c.get("criterio") or "").strip():
+            continue
+        i = len(numbered) + 1
+        item = {"id": f"CA{i:02d}", "titulo": (c.get("titulo") or f"Critério {i}").strip(), "criterio": c["criterio"].strip()}
+        item.update({k: c[k] for k in CRITERION_EXTRA_FIELDS if c.get(k) is not None})
+        numbered.append(item)
+    return numbered
+
+
+def keep_traceability(incoming: list[dict], current: list[dict]) -> list[dict]:
+    """Edição manual da lista de critérios: o cliente reenvia só título e texto. Um critério cujo texto não mudou
+    mantém Dado/Quando/Então, fontes e sinalizações; um critério com texto alterado ou novo perde as fontes
+    (elas sustentavam o texto anterior, não o novo)."""
+    by_text = {normalize(c.get("criterio")): c for c in current or []}
+    result = []
+    for criterion in incoming:
+        previous = by_text.get(normalize(criterion.get("criterio")))
+        extras = {k: previous[k] for k in CRITERION_EXTRA_FIELDS if previous and k in previous}
+        result.append({**extras, **{k: v for k, v in criterion.items() if v is not None}})
+    return result
 
 
 def merge_missing_info(
@@ -160,6 +182,8 @@ class StoryService:
         """US-06 CA01 / US-19 CA02: edição manual gera nova versão (somente se algo mudou)."""
         story = require_story(self.uow, story_id)
         changes = dict(changes)
+        if changes.get("criterios_aceitacao") is not None:
+            changes["criterios_aceitacao"] = keep_traceability(changes["criterios_aceitacao"], story["criterios_aceitacao"])
         text = changes.pop("historia", None)
         if text is not None:
             changes = {**_parse_or_fail(text), **changes}  # campos explícitos têm precedência sobre o texto

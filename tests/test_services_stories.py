@@ -37,7 +37,8 @@ def test_generation_creates_standardized_candidates_for_review(container, projec
     # US-05 CA03: ausência indicada sem suposição
     assert second["status"] == "falta_informacao"
     assert "[A DEFINIR: perfil]" in second["historia"] and "[A DEFINIR: benefício]" in second["historia"]
-    assert {e["elemento"] for e in second["informacoes_ausentes"]} == {"perfil", "beneficio"}
+    # sem evidência válida (F2/F99 não existem), a etapa de critérios registra a lacuna em vez de inventar
+    assert {e["elemento"] for e in second["informacoes_ausentes"]} == {"perfil", "beneficio", "criterios_aceitacao"}
 
 
 def test_generation_links_evidence_with_time_reference(container, project_id, audio_id):
@@ -54,7 +55,7 @@ def test_invalid_label_creates_no_evidence_and_is_flagged(container, project_id,
     def only_invalid(prompt):
         return {"historias": [{"funcionalidade": "gerar relatórios", "perfil": "diretor", "beneficio": "decidir",
                                "fontes": ["F42"]}]}
-    container.llm.handlers["EXTRACAO_HISTORIAS"] = only_invalid
+    container.llm.handlers["GERACAO_US_QUS"] = only_invalid
     job = generate(container, project_id, document_ids=[document_id])
     story = detail(container, job["resultado"]["historias_criadas"][0])
     assert not story["possui_suporte_documental"]  # US-16 CA03
@@ -68,13 +69,13 @@ def test_multiple_sources_and_document_location(container, project_id, audio_id,
         labels = re.findall(r"^\[(F\d+)\]", prompt, flags=re.M)
         return {"historias": [{"funcionalidade": "emitir o boletim em PDF", "perfil": "coordenador",
                                "beneficio": "acompanhar notas", "fontes": labels}]}
-    container.llm.handlers["EXTRACAO_HISTORIAS"] = cite_all
+    container.llm.handlers["GERACAO_US_QUS"] = cite_all
     job = generate(container, project_id, [audio_id], [document_id])
     story = detail(container, job["resultado"]["historias_criadas"][0])
     assert story["fontes_audio"] and story["fontes_documentos"]  # US-16 CA02
     doc_evidence = story["fontes_documentos"][0]
     assert doc_evidence["documento_id"] == document_id and doc_evidence["inicio_caractere"] is not None  # US-17 CA03
-    rag_prompt = container.llm.prompts_for("EXTRACAO_HISTORIAS")[0]
+    rag_prompt = container.llm.prompts_for("GERACAO_US_QUS")[0]
     assert "documento escopo.txt" in rag_prompt  # documentos recuperados por RAG junto à transcrição
 
 
@@ -116,7 +117,8 @@ def test_review_edit_approve_reject_and_backlog(container, project_id, audio_id)
     with container.uow() as uow:
         service = StoryService(uow)
         edited = service.update(second_id, {"perfil": "secretária", "beneficio": "manter o cadastro"}, "ana")
-    assert edited["status"] == "em_revisao" and edited["informacoes_ausentes"] == []  # US-06 CA01
+    assert edited["status"] == "em_revisao"  # US-06 CA01
+    assert [e["elemento"] for e in edited["informacoes_ausentes"]] == ["criterios_aceitacao"]
     assert edited["versao_atual"] == 2
     with container.uow() as uow:
         approved = StoryService(uow).set_status(first_id, StoryStatus.APPROVED)
@@ -235,7 +237,7 @@ def test_traceability_navigation(container, project_id, audio_id, document_id):
     def cite_two(prompt):
         return {"historias": [{"funcionalidade": "emitir boletim", "perfil": "coordenador", "beneficio": "acompanhar",
                                "fontes": ["F1", "F2"]}]}
-    container.llm.handlers["EXTRACAO_HISTORIAS"] = cite_two
+    container.llm.handlers["GERACAO_US_QUS"] = cite_two
     job = generate(container, project_id, [audio_id], [document_id])
     story_id = job["resultado"]["historias_criadas"][0]
     with container.uow() as uow:

@@ -31,8 +31,12 @@ def clean_element(value: str | None) -> str | None:
 
 
 def lower_first(value: str | None) -> str | None:
-    """Minúscula inicial ("Fazer pedidos" → "fazer pedidos"), preservando siglas ("PDV", "QR")."""
-    if not value or len(value) < 2 or not value[0].isupper() or not value[1].islower():
+    """Minúscula inicial ("Fazer pedidos" → "fazer pedidos", "O cliente" → "o cliente"), preservando siglas
+    ("PDV", "QR"): só a primeira palavra com mais de uma letra maiúscula seguida é tratada como sigla."""
+    if not value or not value[0].isupper():
+        return value
+    first = value.split()[0]
+    if len(first) > 1 and not first[1].islower():
         return value
     return value[0].lower() + value[1:]
 

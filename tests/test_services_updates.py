@@ -74,7 +74,7 @@ def test_unmatched_information_becomes_new_requirement(container, project_id, ap
     def extraction(prompt):
         return {"historias": [{"perfil": "responsável", "funcionalidade": "receber notificações de faltas por e-mail",
                                "beneficio": "acompanhar a frequência", "fontes": ["F1"]}]}
-    container.llm.handlers["EXTRACAO_HISTORIAS"] = extraction
+    container.llm.handlers["GERACAO_US_QUS"] = extraction
     container.settings.chunk_size, container.settings.chunk_overlap = 90, 10
     new_doc = upload_document(container, project_id, NEW_DOC, "ata2.txt")
     analyze(container, project_id, [new_doc])

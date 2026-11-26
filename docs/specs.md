@@ -286,14 +286,43 @@ frontend usa esses campos para mostrar em quais fontes a IA se baseou.
   instruções ("ETAPA 1: Entender as fontes") e formato. O JSON pede só `analise` (sistema, participantes,
   usuários, requisitos de negócio `RN#`, funcionalidades `FN#`, fora de escopo). Com análise atual, o modelo
   devolve a análise completa e atualizada, mantendo os códigos.
-- **Prompt de histórias (versão 3.0, `### TAREFA: EXTRACAO_HISTORIAS`):** fontes → `CONTEXTO GERAL` →
-  `ANALISE DO PROJETO` (a análise aprovada) → instruções ("ETAPA 1: Escrever as histórias") e formato. O JSON
-  pede `historias` (com `id` `H#`, `funcionalidade_ref` = código FN da análise, `citacao` literal) e
-  `lacunas_conjunto`. Traz os 13 critérios QUS com exemplos incorreto → correto e a lista do que não é
-  história. Na leitura da resposta: funcionalidade e benefício
-  com minúscula inicial (siglas preservadas); `citacao` conferida contra o texto dos trechos citados (se não
-  bater → `afirmacoes_sem_evidencia`); `lacunas_conjunto` (`conflito`, `fluxo_incompleto`) → `informacoes_ausentes`
-  das HU citadas. `funcionalidade_ref` que não existe na análise é ignorado.
+- **Prompts em arquivo:** os prompts de geração ficam em `app/llm/templates/*.md` (cabeçalho com `versao`,
+  `---`, corpo com placeholders `$nome`) e o contrato da resposta em `app/llm/schemas/*.schema.json`. Os
+  blocos QUS (`_qus_individual.md`, `_qus_conjunto.md`) são compartilhados pela geração e pelo impacto. O
+  resultado de cada job registra `versoes_prompt`. Com `REQSCRIBA_LLM_STRUCTURED_OUTPUT=true`, o schema vai
+  ao provedor (Ollama `format`; OpenAI `response_format.json_schema`); sem isso, só se pede JSON. Em ambos os
+  casos a resposta é normalizada pelo código.
+- **Prompt de histórias (`### TAREFA: GERACAO_US_QUS`, template `geracao_us_qus.md`):** fontes → `CONTEXTO GERAL`
+  → `ANALISE DO PROJETO` (a análise aprovada) → instruções e formato. **Não gera critérios de aceitação**: se o
+  modelo devolver algum, ele é descartado e contado em `validacao.historias.criterios_descartados`. O JSON pede
+  `historias` (com `id` `H#`, `funcionalidade_ref`, e `fontes` como lista de
+  `{trecho_id, afirmacoes_sustentadas, citacao}`), `lacunas_conjunto` (`fluxo_incompleto`, `duplicidade`,
+  `granularidade`), `conflitos_identificados` e `cobertura_funcional`. Na leitura: cada citação é conferida
+  contra o texto do PRÓPRIO trecho citado (se não bater → `afirmacoes_sem_evidencia` "Citação não encontrada
+  no trecho F#"); rótulo inexistente → "Referência a trecho inexistente"; o que cada trecho sustenta vai para
+  `evidencias.afirmacao` ("Sustenta: perfil, funcionalidade"); lacunas e conflitos de conjunto →
+  `informacoes_ausentes` das HU citadas; `funcionalidade_ref` e cobertura de FN inexistente são ignorados.
+  Respostas no formato antigo (`fontes` como lista de rótulos e `citacao` única) continuam aceitas.
+- **Prompt de critérios (`### TAREFA: GERACAO_CRITERIOS_ACEITACAO`, template `geracao_criterios_aceitacao.md`):**
+  recebe várias HU por chamada (até `REQSCRIBA_GENERATION_BATCH_CHARS`), cada uma com os rótulos das suas
+  evidências, mais até `REQSCRIBA_CRITERIA_RELATED_CHUNKS` trechos relacionados (RAG, marcados
+  "relacionado") e a análise aprovada (contexto, não evidência). Devolve, por HU, critérios com `dado`,
+  `quando`, `entao` e `fontes` (`trecho_id`, `afirmacoes_sustentadas`, `citacao`), e `lacunas_criterios`. O
+  código monta `criterio` ("Dado …, quando …, então …."), remove duplicados (similaridade ≥ 0,85), limita a 8,
+  troca rótulos por ids de trecho, sinaliza citação divergente, rótulo inexistente e critério sem fonte
+  ("Critério sem trecho das fontes vinculado."). Trecho relacionado citado vira evidência da HU (afirmação
+  "Sustenta critério de aceitação"). Sem base: zero critérios e lacuna `criterios_aceitacao` em
+  `informacoes_ausentes` (não muda o status da HU). HU ausente da resposta ou lote com falha → lacuna, sem
+  derrubar as demais.
+- **Pipeline do job de geração:** `preparacao` → `geracao_us` → `consolidacao_us` → `validacao_us` →
+  `geracao_criterios` → `validacao_criterios` → `persistencia`. Cada etapa registra `status`
+  (`concluida | erro | ignorada`) e `duracao_s` em `resultado.etapas`, inclusive quando o job falha. A etapa de
+  critérios não é fatal: se falhar, as HU são gravadas sem critérios e com a lacuna. A v1 da HU já nasce com os
+  critérios. `REQSCRIBA_GENERATION_CRITERIA=false` pula a etapa (gere depois, por HU ou em lote).
+- **Critérios sob demanda:** `POST /historias/{id}/criterios/gerar` (síncrono) e
+  `POST /projetos/{id}/criterios/gerar` (job `geracao_criterios`; ignora HU aprovadas, desaprovadas e, sem
+  `substituir`, as que já têm critérios). Os critérios novos substituem os atuais numa nova versão (origem
+  `geracao_criterios_ia`); a anterior é preservada. HU aprovada → `409` (`detalhes.motivo` = `historia_aprovada`).
 - **Geração — modo chamada única:** quando o texto de todas as fontes (mais a análise aprovada) cabe em
   `REQSCRIBA_GENERATION_BATCH_CHARS`, uma única chamada recebe tudo, e as passadas de contexto e de
   consolidação não rodam. Para modelos com contexto grande (ex.: Llama 4 Scout), aumente essa variável
@@ -423,6 +452,9 @@ Fakes: `FakeLLM` (roteia pelo marcador `### TAREFA:` do prompt), `FakeTranscribe
 | `REQSCRIBA_GENERATION_CONTEXT_PASS` | `true` (passada de contexto prévia: análise das fontes e novas fontes sem análise aprovada) |
 | `REQSCRIBA_GENERATION_CONTEXT_CHARS` | `1200` (limite do bloco de contexto nos prompts) |
 | `REQSCRIBA_GENERATION_CONSOLIDATION` | `true` (passada de consolidação) |
+| `REQSCRIBA_GENERATION_CRITERIA` | `true` (etapa de critérios de aceitação dentro do job de geração) |
+| `REQSCRIBA_CRITERIA_RELATED_CHUNKS` | `2` (trechos relacionados por HU no prompt de critérios; `0` desliga) |
+| `REQSCRIBA_LLM_STRUCTURED_OUTPUT` | `false` (envia o JSON Schema do prompt ao provedor) |
 | `REQSCRIBA_CORS_ORIGINS` | `http://localhost:3000,http://localhost:5173` |
 | `REQSCRIBA_LOG_LEVEL` | `INFO` |
 

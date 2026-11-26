@@ -117,6 +117,11 @@ em `GET {base}/models`. Confira o resultado em `GET /api/v1/health`.
   uma chamada ao LLM; desligue-a com `REQSCRIBA_GENERATION_CONSOLIDATION=false`. A passada de contexto prévia
   (`REQSCRIBA_GENERATION_CONTEXT_PASS`) só roda na análise das fontes e na análise de novas fontes sem análise
   aprovada; a geração de HU usa a análise aprovada no lugar dela.
+- **Histórias e critérios em etapas separadas:** o job de geração escreve as HU (`GERACAO_US_QUS`) e depois os
+  critérios de aceitação (`GERACAO_CRITERIOS_ACEITACAO`), com as etapas e durações em `resultado.etapas`. Para
+  gerar critérios depois, use `POST /api/v1/historias/{id}/criterios/gerar` ou
+  `POST /api/v1/projetos/{id}/criterios/gerar`. Os prompts ficam em `app/llm/templates/` e os schemas em
+  `app/llm/schemas/`.
 - **Modelos com *thinking*:** prefira o provedor `ollama` para modelos do Ollama. Só ele envia `think: false`,
   e o `qwen3.5:4b` não respondeu em 240 s pela API `/v1`, contra 36 s pela API nativa.
 

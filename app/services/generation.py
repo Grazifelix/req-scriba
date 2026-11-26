@@ -23,15 +23,23 @@ from app.domain.enums import ChangeOrigin, ChangeType, JobStatus, JobType, Sourc
 from app.domain.text import similarity
 from app.services import presenters
 from app.services.analysis import analysis_text, approved_analysis, functionality_codes, link_stories
+from app.domain.traceability import CRITERIA_ELEMENT, criteria_report, story_report
+from app.llm import prompts
 from app.services.candidates import (
-    DUPLICATE_THRESHOLD, EXISTING_DUPLICATE_THRESHOLD, deduplicate, extract_batch, extract_candidates, story_key,
+    DUPLICATE_THRESHOLD, EXISTING_DUPLICATE_THRESHOLD, deduplicate, extract_batch_result, extract_candidates, story_key,
 )
+from app.services.criteria import (
+    CriteriaOutcome, CriteriaTarget, apply_to_candidate, evidence_chunks, generate_criteria, related_for,
+)
+from app.services.pipeline import StageLog
 from app.services.consolidation import consolidate
 from app.services.context import MeetingContext
 from app.services.indexing import source_key
 from app.services.jobs import JobService, validate_sources
 from app.services.retrieval import group_by_chars, related_chunks
-from app.services.stories import create_story_record
+from app.services.stories import build_content, create_story_record
+
+NOT_GENERATED = "Critérios de aceitação ainda não gerados para esta história."
 
 logger = logging.getLogger(__name__)
 
@@ -118,24 +126,27 @@ def drop_existing(candidates: list[dict], existing: list[dict]) -> tuple[list[di
 
 def _extract_all(
     container: Container, job_id: str, batches: list[list[dict]], analysis: str | None, fn_codes: set[str],
-) -> tuple[list[dict], list[dict]]:
-    """Extrai cada lote; as candidatas guardam o código FN da análise que citaram (só códigos existentes)."""
-    candidates, failures = [], []
+) -> tuple[list[dict], list[dict], list[dict]]:
+    """GERACAO_US_QUS em cada lote. Retorna (candidatas, falhas por lote, cobertura funcional declarada).
+
+    As candidatas guardam o código FN da análise que citaram (só códigos existentes)."""
+    candidates, failures, coverage = [], [], []
     complete = len(batches) == 1
     for index, batch in enumerate(batches, start=1):
         try:
-            extracted = extract_batch(container, batch, None, analysis, complete)
+            extracted = extract_batch_result(container, batch, None, analysis, complete)
         except AppError as exc:
             logger.warning("Lote %d do job %s falhou: %s", index, job_id, exc.message)
             failures.append({"lote": index, "erro": exc.message})
             continue
-        for candidate in extracted:
+        for candidate in extracted["historias"]:
             ref = candidate.pop("funcionalidade_ref", None)
             candidate["funcionalidades"] = [ref] if ref in fn_codes else []
-        candidates.extend(extracted)
+        candidates.extend(extracted["historias"])
+        coverage += [{**c, "lote": index} for c in extracted["cobertura"] if c["funcionalidade_ref"] in fn_codes]
     if batches and len(failures) == len(batches):
         raise AppError("Todos os lotes falharam na extração.", {"lotes_com_erro": failures})
-    return candidates, failures
+    return candidates, failures, coverage
 
 
 def _prepare(container: Container, project_id: int, params: dict) -> tuple:
@@ -155,46 +166,129 @@ def _prepare(container: Container, project_id: int, params: dict) -> tuple:
     return batches, existing, (analysis, text, fn_codes)
 
 
+def _selected_keys(params: dict) -> list[str]:
+    return ([source_key(SourceType.AUDIO.value, a) for a in params["audio_ids"]]
+            + [source_key(SourceType.DOCUMENT.value, d) for d in params["documento_ids"]])
+
+
+def _criteria_stage(
+    container: Container, project_id: int, candidates: list[dict], text: str | None, params: dict,
+) -> dict[str, Any]:
+    """GERACAO_CRITERIOS_ACEITACAO sobre as candidatas, antes de gravá-las: a versão 1 já nasce com os critérios.
+
+    Uma história cujo lote falhou é gravada sem critérios e com a lacuna sinalizada (pode ser regerada depois)."""
+    keys = _selected_keys(params)
+    with container.uow() as uow:
+        targets = []
+        for index, candidate in enumerate(candidates, start=1):
+            story = {**candidate, **build_content(candidate)}
+            evidences = evidence_chunks(candidate["evidencias"])
+            related = related_for(uow, container, project_id, story, {c["id"] for c in evidences}, keys)
+            targets.append(CriteriaTarget(f"H{index}", story, evidences, related))
+    outcomes, failures = generate_criteria(container, targets, text)
+    for target, candidate in zip(targets, candidates):
+        apply_to_candidate(candidate, outcomes.get(target.ref))
+    if targets and len(failures) == len(targets):
+        raise AppError("A geração de critérios falhou para todas as histórias.", {"falhas": failures})
+    return {"historias": len(targets), "falhas": failures}
+
+
+def _without_criteria(candidates: list[dict], reason: str) -> None:
+    for candidate in candidates:
+        apply_to_candidate(candidate, CriteriaOutcome([], [{"elemento": CRITERIA_ELEMENT, "descricao": reason}], []))
+
+
+def _persist(container: Container, project_id: int, candidates: list[dict], analysis: dict) -> list[int]:
+    with container.uow() as uow:
+        created, links = [], []
+        for c in candidates:
+            story_id = create_story_record(
+                uow, project_id, c, origin="ia", change_type=ChangeType.AUTOMATIC,
+                change_origin=ChangeOrigin.AI_GENERATION, author="sistema", evidence_specs=c["evidencias"],
+            )
+            links.append((c.get("funcionalidades") or [], story_id))
+            created.append(story_id)
+        link_stories(uow, analysis["id"], links)
+    return created
+
+
+def _criteria_step(container: Container, stages: StageLog, project_id: int, candidates: list[dict],
+                   text: str | None, params: dict) -> list[dict]:
+    """Etapa de critérios (não fatal). Retorna as falhas registradas."""
+    if not candidates:
+        stages.skip("geracao_criterios", "nenhuma história nova")
+        return []
+    if not container.settings.generation_criteria:
+        stages.skip("geracao_criterios", "desligada (REQSCRIBA_GENERATION_CRITERIA)")
+        _without_criteria(candidates, NOT_GENERATED)
+        return []
+    info: dict[str, Any] = {"falhas": []}
+    with stages.run("geracao_criterios", fatal=False) as stage:
+        info = _criteria_stage(container, project_id, candidates, text, params)
+        stage.update(historias=info["historias"], falhas=len(info["falhas"]))
+    if stages.failed("geracao_criterios"):
+        return [{"erro": stages.stages[-1]["erro"]}]
+    return info["falhas"]
+
+
 def run_generation(container: Container, job_id: str) -> None:
-    """Tarefa de background do job de geração (fases curtas de banco + chamadas ao LLM fora da transação)."""
+    """Job de geração: preparação → GERACAO_US_QUS → consolidação das US → validação estrutural das US →
+    GERACAO_CRITERIOS_ACEITACAO → validação estrutural dos critérios → persistência.
+
+    Cada etapa registra status e duração em ``resultado.etapas``. A falha dos critérios não perde as histórias:
+    elas são gravadas sem critérios e com a lacuna sinalizada. Chamadas ao LLM ficam fora das transações."""
     with container.uow() as uow:
         job = uow.jobs.get(job_id)
         if not job:
             return
         JobService(uow).mark(job_id, JobStatus.PROCESSING)
     params, project_id = job["parametros"], job["projeto_id"]
+    stages = StageLog()
     try:
-        batches, existing, (analysis, text, fn_codes) = _prepare(container, project_id, params)
-        single = len(batches) == 1
-        candidates, failures = _extract_all(container, job_id, batches, text, fn_codes)
-        candidates, consolidation = deduplicate(candidates), None
-        if not single:  # na chamada única o modelo já viu o conjunto inteiro
-            candidates, consolidation = consolidate(container, candidates)
-        candidates, skipped = drop_existing(candidates, existing)
+        with stages.run("preparacao") as stage:
+            batches, existing, (analysis, text, fn_codes) = _prepare(container, project_id, params)
+            single = len(batches) == 1
+            stage.update(lotes=len(batches), modo="chamada_unica" if single else "lotes")
+        with stages.run("geracao_us") as stage:
+            candidates, failures, coverage = _extract_all(container, job_id, batches, text, fn_codes)
+            stage.update(candidatas=len(candidates), lotes_com_erro=len(failures))
+        with stages.run("consolidacao_us") as stage:
+            candidates, consolidation = deduplicate(candidates), None
+            if not single:  # na chamada única o modelo já viu o conjunto inteiro
+                candidates, consolidation = consolidate(container, candidates)
+            candidates, skipped = drop_existing(candidates, existing)
+            stage.update(historias=len(candidates), ignoradas_por_duplicidade=len(skipped))
+        with stages.run("validacao_us") as stage:
+            story_validation = story_report(candidates)
+            stage.update(story_validation)
+        criteria_failures = _criteria_step(container, stages, project_id, candidates, text, params)
+        with stages.run("validacao_criterios") as stage:
+            criteria_validation = criteria_report(candidates)
+            stage.update(criteria_validation)
+        with stages.run("persistencia") as stage:
+            created = _persist(container, project_id, candidates, analysis)
+            stage.update(historias_criadas=len(created))
+        result: dict[str, Any] = {
+            "historias_criadas": created, "total": len(created), "lotes": len(batches),
+            "modo": "chamada_unica" if single else "lotes", "lotes_com_erro": failures,
+            "ignoradas_por_duplicidade": skipped, "analise_id": analysis["id"], "consolidacao": consolidation,
+            "cobertura_funcional": coverage,
+            "validacao": {"historias": story_validation, "criterios": criteria_validation},
+            "criterios": {"falhas": criteria_failures},
+            "etapas": stages.stages, "duracao_total_s": stages.total_seconds(),
+            "versoes_prompt": prompts.prompt_versions(),
+            "mensagem": None if created else "Nenhuma nova necessidade funcional foi identificada nas fontes.",
+        }
         with container.uow() as uow:
-            created, links = [], []
-            for c in candidates:
-                story_id = create_story_record(
-                    uow, project_id, c, origin="ia", change_type=ChangeType.AUTOMATIC,
-                    change_origin=ChangeOrigin.AI_GENERATION, author="sistema", evidence_specs=c["evidencias"],
-                )
-                links.append((c.get("funcionalidades") or [], story_id))
-                created.append(story_id)
-            link_stories(uow, analysis["id"], links)
-            result: dict[str, Any] = {
-                "historias_criadas": created, "total": len(created), "lotes": len(batches),
-                "modo": "chamada_unica" if single else "lotes", "lotes_com_erro": failures,
-                "ignoradas_por_duplicidade": skipped, "analise_id": analysis["id"], "consolidacao": consolidation,
-                "mensagem": None if created else "Nenhuma nova necessidade funcional foi identificada nas fontes.",
-            }
             JobService(uow).mark(job_id, JobStatus.COMPLETED, result=result)
     except AppError as exc:
-        _fail(container, job_id, exc.message, exc.details)
+        details = {"detalhes": exc.details} if exc.details else {}
+        _fail(container, job_id, exc.message, {**details, "etapas": stages.stages})
     except Exception as exc:
         logger.exception("Falha inesperada no job %s", job_id)
-        _fail(container, job_id, f"Erro inesperado: {type(exc).__name__}", None)
+        _fail(container, job_id, f"Erro inesperado: {type(exc).__name__}", {"etapas": stages.stages})
 
 
-def _fail(container: Container, job_id: str, message: str, details: Any) -> None:
+def _fail(container: Container, job_id: str, message: str, result: dict | None) -> None:
     with container.uow() as uow:
-        JobService(uow).mark(job_id, JobStatus.ERROR, result={"detalhes": details} if details else None, error=message)
+        JobService(uow).mark(job_id, JobStatus.ERROR, result=result or None, error=message)

@@ -152,25 +152,85 @@ def _benefit(value: Any) -> str | None:
     return clean_element(stripped)
 
 
+STORY_COMPONENTS = ("perfil", "funcionalidade", "beneficio")
+CRITERION_COMPONENTS = ("dado", "quando", "entao")
+_COMPONENT_ALIASES = {"benefício": "beneficio", "então": "entao", "resultado_esperado": "entao", "resultado": "entao",
+                      "condicao": "dado", "condição": "dado", "contexto": "dado", "acao": "quando", "ação": "quando",
+                      "evento": "quando"}
+
+
+def _components(value: Any, allowed: tuple[str, ...]) -> list[str]:
+    result = []
+    for item in _as_list(value):
+        name = _key(item)
+        name = _COMPONENT_ALIASES.get(name, name)
+        if name in allowed and name not in result:
+            result.append(name)
+    return result
+
+
+def source_entries(value: Any, valid_labels: set[str], components: tuple[str, ...] = STORY_COMPONENTS
+                   ) -> tuple[list[dict[str, Any]], list[str]]:
+    """Fontes citadas: aceita rótulos soltos (formato antigo) ou objetos {trecho_id, afirmacoes_sustentadas,
+    citacao}. Retorna (entradas válidas sem rótulo repetido, rótulos citados que não existem no prompt)."""
+    entries: dict[str, dict[str, Any]] = {}
+    invalid: list[str] = []
+    for item in _as_list(value):
+        raw = _pick(item, "trecho_id", "rotulo", "fonte", "id", "trecho") if isinstance(item, dict) else item
+        label = normalize_label(raw)
+        if not label or label not in valid_labels:
+            text = _text(raw, 40)
+            if text and text not in invalid:
+                invalid.append(text)
+            continue
+        entry = entries.setdefault(label, {"rotulo": label, "afirmacoes": [], "citacao": None})
+        if isinstance(item, dict):
+            claims = _components(_pick(item, "afirmacoes_sustentadas", "sustenta", "componentes"), components)
+            entry["afirmacoes"] += [c for c in claims if c not in entry["afirmacoes"]]
+            entry["citacao"] = entry["citacao"] or _text(_pick(item, "citacao", "citação", "quote", "trecho_literal"), 500)
+    return list(entries.values()), invalid
+
+
+def _claims(value: Any) -> list[str]:
+    """Afirmações sem evidência: texto livre ou {componente, descricao} (vira "componente: descricao")."""
+    claims = []
+    for item in _as_list(value):
+        if isinstance(item, dict):
+            component = _text(_pick(item, "componente", "campo", "elemento"), 40)
+            description = _text(_pick(item, "descricao", "description", "afirmacao", "motivo"), 500)
+            text = f"{component}: {description}" if component and description else (description or component)
+        else:
+            text = _text(item, 500)
+        if text and text not in claims:
+            claims.append(text)
+    return claims[:10]
+
+
 def normalize_story(item: dict[str, Any], valid_labels: set[str]) -> dict[str, Any] | None:
-    """Normaliza uma história candidata. Retorna None se não houver funcionalidade."""
+    """Normaliza uma história candidata. Retorna None se não houver funcionalidade.
+
+    "fontes" mantém só os rótulos (contrato antigo); "fontes_detalhe" traz o que cada trecho sustenta e a
+    citação dele; "fontes_invalidas", os rótulos citados que não existem (validação estrutural)."""
     if not isinstance(item, dict):
         return None
     funcionalidade = clean_element(_text(_pick(item, "funcionalidade", "acao", "action", "quero", "want", "meio"), 500))
     if not funcionalidade:
         return None
     beneficio = _benefit(_pick(item, "beneficio", "benefit", "para", "so_that", "fim", "objetivo"))
+    entries, invalid = source_entries(
+        _pick(item, "fontes", "sources", "evidencias", "referencias", "trechos"), valid_labels
+    )
     return {
         "titulo": _text(_pick(item, "titulo", "title", "nome"), 200),
         "perfil": clean_element(_text(_pick(item, "perfil", "persona", "papel", "role", "ator", "como"), 200)),
         "funcionalidade": lower_first(funcionalidade),
         "beneficio": lower_first(beneficio),
         "criterios_aceitacao": _criteria(_pick(item, "criterios_aceitacao", "acceptance_criteria", "criterios")),
-        "fontes": _labels(_pick(item, "fontes", "sources", "evidencias", "referencias", "trechos"), valid_labels),
+        "fontes": [e["rotulo"] for e in entries],
+        "fontes_detalhe": entries,
+        "fontes_invalidas": invalid,
         "informacoes_ausentes": _gaps(_pick(item, "informacoes_ausentes", "lacunas", "missing_info")),
-        "afirmacoes_sem_evidencia": [
-            t for t in (_text(x, 500) for x in _as_list(_pick(item, "afirmacoes_sem_evidencia", "unsupported_claims"))) if t
-        ][:10],
+        "afirmacoes_sem_evidencia": _claims(_pick(item, "afirmacoes_sem_evidencia", "unsupported_claims")),
     }
 
 
@@ -249,23 +309,43 @@ def normalize_analysis_result(data: dict[str, Any], valid_labels: set[str]) -> d
     return normalize_analysis(block if isinstance(block, dict) else data, valid_labels)
 
 
-def _set_gaps(value: Any) -> list[dict[str, Any]]:
+SET_GAP_TYPES = ("conflito", "fluxo_incompleto", "duplicidade", "granularidade")
+
+
+def _story_refs(value: Any) -> list[str]:
+    return [r for r in (_code(x, "H") for x in _as_list(value)) if r]
+
+
+def _set_gaps(value: Any, default_type: str = "fluxo_incompleto") -> list[dict[str, Any]]:
     gaps = []
     for item in _as_list(value):
         if not isinstance(item, dict):
             continue
-        kind = _key(_pick(item, "tipo", "type", default="fluxo_incompleto"))
-        refs = [r for r in (_code(x, "H") for x in _as_list(_pick(item, "historias", "stories", "ids"))) if r]
+        kind = _key(_pick(item, "tipo", "type", default=default_type))
+        refs = _story_refs(_pick(item, "historias", "stories", "ids", "historia"))
         description = _text(_pick(item, "descricao", "description", "motivo"), 1000)
         if refs and description:
-            gaps.append({"tipo": "conflito" if kind.startswith("conf") else "fluxo_incompleto",
+            gaps.append({"tipo": next((t for t in SET_GAP_TYPES if kind.startswith(t[:5])), default_type),
                          "historias": refs, "descricao": description})
     return gaps
 
 
+def _coverage(value: Any) -> list[dict[str, Any]]:
+    coverage = []
+    for item in _as_list(value):
+        if not isinstance(item, dict):
+            continue
+        code = _code(_pick(item, "funcionalidade_ref", "funcionalidade", "fn", "id"), "FN")
+        if code:
+            coverage.append({"funcionalidade_ref": code, "historias": _story_refs(_pick(item, "historias", "stories")),
+                             "observacao": _text(_pick(item, "observacao", "motivo", "situacao"), 500)})
+    return coverage
+
+
 def normalize_extraction_result(data: dict[str, Any], valid_labels: set[str]) -> dict[str, Any]:
-    """Resposta completa da extração: histórias (com "ref", "funcionalidade_ref" e "citacao"), análise e
-    lacunas de conjunto. Campos ausentes viram valores vazios: respostas no formato antigo continuam válidas."""
+    """Resposta da geração de US: histórias (com "ref", "funcionalidade_ref" e "citacao" do formato antigo),
+    lacunas de conjunto (inclusive os conflitos identificados, como tipo "conflito") e cobertura funcional.
+    Campos ausentes viram valores vazios: respostas no formato antigo continuam válidas."""
     stories = []
     for raw in _story_items(data):
         story = normalize_story(raw, valid_labels)
@@ -275,11 +355,86 @@ def normalize_extraction_result(data: dict[str, Any], valid_labels: set[str]) ->
         story["funcionalidade_ref"] = _code(_pick(raw, "funcionalidade_ref", "funcionalidade_id"), "FN")
         story["citacao"] = _text(_pick(raw, "citacao", "citação", "quote", "trecho_literal"), 500)
         stories.append(story)
+    gaps = _set_gaps(_pick(data, "lacunas_conjunto", "lacunas_do_conjunto", "set_gaps"))
+    gaps += [g for g in _set_gaps(_pick(data, "conflitos_identificados", "conflitos"), "conflito") if g not in gaps]
     return {
         "historias": stories,
         "analise": normalize_analysis(_pick(data, "analise", "análise", "analysis"), valid_labels),
-        "lacunas": _set_gaps(_pick(data, "lacunas_conjunto", "lacunas_do_conjunto", "set_gaps")),
+        "lacunas": gaps,
+        "cobertura": _coverage(_pick(data, "cobertura_funcional", "cobertura")),
     }
+
+
+# -- Critérios de aceitação (GERACAO_CRITERIOS_ACEITACAO) -------------------
+MAX_GENERATED_CRITERIA = 8
+_GHERKIN_PREFIX = {"dado": r"^(dado\s+(que\s+)?)", "quando": r"^(quando\s+)", "entao": r"^(ent[aã]o\s+)"}
+
+
+def _gherkin_part(value: Any, part: str) -> str | None:
+    text = _text(value, 700)
+    if not text:
+        return None
+    return lower_first(re.sub(_GHERKIN_PREFIX[part], "", text, flags=re.IGNORECASE).strip(" .,;")) or None
+
+
+def gherkin_text(dado: str | None, quando: str | None, entao: str | None) -> str | None:
+    """Monta "Dado …, quando …, então …." a partir das partes (partes ausentes são omitidas)."""
+    parts = [f"{word} {value}" for word, value in (("Dado", dado), ("quando", quando), ("então", entao)) if value]
+    if not parts:
+        return None
+    text = ", ".join(parts)
+    return text[0].upper() + text[1:] + "."
+
+
+def normalize_criterion(item: Any, valid_labels: set[str]) -> dict[str, Any] | None:
+    """Critério com as partes Dado/Quando/Então separadas (ou só o texto, se o modelo não separar)."""
+    if isinstance(item, str):
+        item = {"criterio": item}
+    if not isinstance(item, dict):
+        return None
+    dado, quando, entao = (_gherkin_part(_pick(item, *names), part) for part, names in (
+        ("dado", ("dado", "given", "contexto")), ("quando", ("quando", "when", "acao")),
+        ("entao", ("entao", "então", "then", "resultado")),
+    ))
+    text = gherkin_text(dado, quando, entao) if (quando or entao) else None
+    text = text or _text(_pick(item, "criterio", "criteria", "descricao", "texto", "gherkin"))
+    if not text:
+        return None
+    entries, invalid = source_entries(_pick(item, "fontes", "sources", "evidencias", "trechos"), valid_labels,
+                                      CRITERION_COMPONENTS)
+    return {
+        "titulo": _text(_pick(item, "titulo", "title", "nome"), 200), "criterio": text,
+        "dado": dado, "quando": quando, "entao": entao,
+        "fontes_detalhe": entries, "fontes_invalidas": invalid,
+        "informacoes_ausentes": _gaps(_pick(item, "informacoes_ausentes", "lacunas")),
+        "afirmacoes_sem_evidencia": _claims(_pick(item, "afirmacoes_sem_evidencia", "unsupported_claims")),
+    }
+
+
+def normalize_criteria_result(data: dict[str, Any], story_refs: set[str], valid_labels: set[str]) -> dict[str, Any]:
+    """Resposta do prompt de critérios: {"historias": {H1: {"criterios", "lacunas"}}, "lacunas_conjunto"}.
+
+    Histórias que o modelo não devolveu ficam de fora (o chamador as trata como falha daquela história);
+    ids desconhecidos são ignorados, porque critérios nunca criam histórias."""
+    stories: dict[str, dict[str, Any]] = {}
+    for item in _as_list(_pick(data, "historias", "stories", "itens")):
+        if not isinstance(item, dict):
+            continue
+        ref = _code(_pick(item, "id", "historia", "historia_id"), "H")
+        if ref not in story_refs or ref in stories:
+            continue
+        criteria = [c for c in (normalize_criterion(x, valid_labels) for x in _as_list(
+            _pick(item, "criterios_aceitacao", "acceptance_criteria", "criterios"))) if c]
+        stories[ref] = {
+            "criterios": criteria[:MAX_GENERATED_CRITERIA],
+            "lacunas": _gaps(_pick(item, "lacunas_criterios", "lacunas", "informacoes_ausentes")),
+        }
+    conjunto = []
+    for item in _as_list(_pick(data, "lacunas_conjunto")):
+        if isinstance(item, dict) and _text(_pick(item, "descricao", "description")):
+            conjunto.append({"historias": _story_refs(_pick(item, "historias")),
+                             "descricao": _text(_pick(item, "descricao", "description"), 1000)})
+    return {"historias": stories, "lacunas_conjunto": conjunto}
 
 
 CONTEXT_TYPES = {

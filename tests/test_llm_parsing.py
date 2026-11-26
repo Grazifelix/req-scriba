@@ -211,3 +211,57 @@ def test_normalize_split_criteria_by_id_or_position():
     assert second == [{"titulo": "A", "criterio": "Dado a, quando b, então c."}]
     assert first == [{"titulo": "Critério 1", "criterio": "Dado x, quando y, então z."}]
     assert parsing.normalize_split_criteria({}, 2) == [[], []]
+
+
+# -- Milestone 1: fontes com afirmações sustentadas e critérios Dado/Quando/Então ----------------
+def test_story_sources_accept_objects_and_legacy_labels():
+    story = parsing.normalize_story({"funcionalidade": "emitir boletim", "fontes": [
+        {"trecho_id": "F2", "afirmacoes_sustentadas": ["Perfil", "benefício", "telas"], "citacao": "emitir o boletim"},
+        "F1", {"trecho_id": "F2", "afirmacoes_sustentadas": ["funcionalidade"]}, {"trecho_id": "FN3"}, "F9",
+    ]}, {"F1", "F2"})
+    assert story["fontes"] == ["F2", "F1"]
+    assert story["fontes_detalhe"][0] == {"rotulo": "F2", "afirmacoes": ["perfil", "beneficio", "funcionalidade"],
+                                          "citacao": "emitir o boletim"}
+    assert story["fontes_invalidas"] == ["FN3", "F9"]
+
+
+def test_unsupported_claims_accept_component_objects():
+    story = parsing.normalize_story({"funcionalidade": "x", "afirmacoes_sem_evidencia": [
+        {"componente": "beneficio", "descricao": "não citado"}, "texto livre"]}, set())
+    assert story["afirmacoes_sem_evidencia"] == ["beneficio: não citado", "texto livre"]
+
+
+def test_extraction_result_merges_conflicts_into_set_gaps_and_reads_coverage():
+    data = {"historias": [{"id": "H1", "funcionalidade": "a", "fontes": ["F1"]}],
+            "lacunas_conjunto": [{"tipo": "duplicidade", "historias": ["H1"], "descricao": "repete"}],
+            "conflitos_identificados": [{"historias": ["H1", "H2"], "descricao": "contradiz"}],
+            "cobertura_funcional": [{"funcionalidade_ref": "FN1", "historias": ["H1"]}, {"historias": ["H1"]}]}
+    result = parsing.normalize_extraction_result(data, {"F1"})
+    assert [g["tipo"] for g in result["lacunas"]] == ["duplicidade", "conflito"]
+    assert result["cobertura"] == [{"funcionalidade_ref": "FN1", "historias": ["H1"], "observacao": None}]
+
+
+def test_criterion_composes_gherkin_and_strips_repeated_keywords():
+    criterion = parsing.normalize_criterion({"titulo": "PDF", "dado": "Dado que a turma existe",
+                                             "quando": "Quando emitir", "então": "Então gera o PDF.",
+                                             "fontes": [{"trecho_id": "F1", "afirmacoes_sustentadas": ["resultado_esperado"]}]},
+                                            {"F1"})
+    assert criterion["criterio"] == "Dado a turma existe, quando emitir, então gera o PDF."
+    assert criterion["fontes_detalhe"] == [{"rotulo": "F1", "afirmacoes": ["entao"], "citacao": None}]
+    capitalized = parsing.normalize_criterion({"dado": "O cliente está na mesa", "quando": "O cliente pede",
+                                               "entao": "O pedido vai ao PDV"}, set())
+    assert capitalized["criterio"] == "Dado o cliente está na mesa, quando o cliente pede, então o pedido vai ao PDV."
+    legacy = parsing.normalize_criterion("Dado x, quando y, então z.", set())
+    assert legacy["criterio"] == "Dado x, quando y, então z." and legacy["dado"] is None
+
+
+def test_criteria_result_ignores_unknown_stories_and_caps_criteria():
+    data = {"historias": [
+        {"id": "H1", "criterios_aceitacao": [{"quando": f"a{i}", "entao": "b"} for i in range(12)],
+         "lacunas_criterios": [{"elemento": "regras", "descricao": "falta"}]},
+        {"id": "H7", "criterios_aceitacao": [{"quando": "x", "entao": "y"}]},
+    ]}
+    result = parsing.normalize_criteria_result(data, {"H1", "H2"}, set())
+    assert set(result["historias"]) == {"H1"}
+    assert len(result["historias"]["H1"]["criterios"]) == parsing.MAX_GENERATED_CRITERIA
+    assert result["historias"]["H1"]["lacunas"] == [{"elemento": "regras", "descricao": "falta"}]

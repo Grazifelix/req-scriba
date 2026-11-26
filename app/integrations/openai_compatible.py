@@ -27,7 +27,9 @@ class OpenAICompatibleClient:
         timeout: int = 900,
         temperature: float = 0.1,
         session: requests.Session | None = None,
+        structured_output: bool = False,
     ) -> None:
+        self.structured_output = structured_output
         self.base_url = base_url.rstrip("/")
         self.model = model
         self.embedding_model = embedding_model
@@ -44,12 +46,16 @@ class OpenAICompatibleClient:
         )
 
     # -- LLM -----------------------------------------------------------------
-    def _chat(self, messages: list[dict[str, str]]) -> str:
+    def _chat(self, messages: list[dict[str, str]], schema: dict[str, Any] | None = None) -> str:
+        response_format: dict[str, Any] = {"type": "json_object"}
+        if schema and self.structured_output:
+            name = str(schema.get("title") or "resposta").lower()
+            response_format = {"type": "json_schema", "json_schema": {"name": name, "schema": schema}}
         payload = {
             "model": self.model,
             "messages": messages,
             "temperature": self.temperature,
-            "response_format": {"type": "json_object"},
+            "response_format": response_format,
         }
         started = time.perf_counter()
         data = self._post("/chat/completions", payload)
@@ -59,8 +65,8 @@ class OpenAICompatibleClient:
         except (KeyError, IndexError, TypeError) as exc:
             raise ExternalServiceError(f"Resposta de chat inválida do {PROVIDER_LABEL}.") from exc
 
-    def generate_json(self, system: str, prompt: str) -> dict[str, Any]:
-        return generate_json_with_retry(self._chat, system, prompt)
+    def generate_json(self, system: str, prompt: str, schema: dict[str, Any] | None = None) -> dict[str, Any]:
+        return generate_json_with_retry(self._chat, system, prompt, schema)
 
     # -- Embeddings ----------------------------------------------------------
     def embed(self, texts: list[str]) -> list[list[float]]:

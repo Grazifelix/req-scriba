@@ -58,6 +58,7 @@ class JobType(LabeledEnum):
     UPDATE_ANALYSIS = "analise_atualizacao"
     SOURCE_ANALYSIS = "analise_fontes"
     QUALITY_EVALUATION = "avaliacao_qualidade"
+    CRITERIA_GENERATION = "geracao_criterios"
 
 
 class SourceType(LabeledEnum):
@@ -76,6 +77,7 @@ class ChangeOrigin(LabeledEnum):
     MANUAL_EDIT = "edicao_manual"
     AI_SUGGESTION = "sugestao_ia"
     AI_SUGGESTION_EDITED = "sugestao_ia_editada"
+    AI_CRITERIA = "geracao_criterios_ia"
 
 
 class AnalysisItemType(LabeledEnum):
@@ -121,6 +123,7 @@ LABELS: dict[Enum, str] = {
     JobType.UPDATE_ANALYSIS: "Análise de novas fontes",
     JobType.SOURCE_ANALYSIS: "Análise das fontes",
     JobType.QUALITY_EVALUATION: "Avaliação de qualidade",
+    JobType.CRITERIA_GENERATION: "Geração de critérios de aceitação",
     SourceType.AUDIO: "Áudio",
     SourceType.DOCUMENT: "Documento",
     ChangeType.MANUAL: "Manual",
@@ -130,6 +133,7 @@ LABELS: dict[Enum, str] = {
     ChangeOrigin.MANUAL_EDIT: "Edição manual",
     ChangeOrigin.AI_SUGGESTION: "Sugestão da IA aplicada",
     ChangeOrigin.AI_SUGGESTION_EDITED: "Sugestão da IA editada e aplicada",
+    ChangeOrigin.AI_CRITERIA: "Critérios de aceitação gerados pela IA",
     AnalysisItemType.PARTICIPANT: "Participante da reunião",
     AnalysisItemType.USER: "Usuário do sistema",
     AnalysisItemType.BUSINESS_REQUIREMENT: "Requisito de negócio",

@@ -49,6 +49,7 @@ def _build_client(
         return OllamaClient(
             base_url or settings.ollama_url, settings.llm_model, settings.embedding_model,
             timeout=settings.llm_timeout, temperature=settings.llm_temperature, num_ctx=settings.llm_num_ctx,
+            structured_output=settings.llm_structured_output,
         )
     if provider == OPENAI_COMPATIBLE_PROVIDER:
         if not base_url:
@@ -56,6 +57,7 @@ def _build_client(
         return OpenAICompatibleClient(
             base_url, settings.llm_model, settings.embedding_model, api_key=api_key,
             timeout=settings.llm_timeout, temperature=settings.llm_temperature,
+            structured_output=settings.llm_structured_output,
         )
     raise ValueError(
         f"Provedor '{provider}' desconhecido em REQSCRIBA_{variable_prefix}_PROVIDER. "

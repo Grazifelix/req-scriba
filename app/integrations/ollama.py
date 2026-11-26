@@ -44,7 +44,9 @@ class OllamaClient:
         temperature: float = 0.1,
         num_ctx: int = 8192,
         session: requests.Session | None = None,
+        structured_output: bool = False,
     ) -> None:
+        self.structured_output = structured_output
         self.base_url = base_url.rstrip("/")
         self.model = model
         self.embedding_model = embedding_model
@@ -57,12 +59,13 @@ class OllamaClient:
         return post_json(self.session, f"{self.base_url}{path}", payload, self.timeout, PROVIDER_LABEL)
 
     # -- LLM -----------------------------------------------------------------
-    def _chat(self, messages: list[dict[str, str]]) -> str:
+    def _chat(self, messages: list[dict[str, str]], schema: dict[str, Any] | None = None) -> str:
         payload = {
             "model": self.model,
             "messages": messages,
             "stream": False,
-            "format": "json",
+            # Saída estruturada: o Ollama restringe a geração ao JSON Schema; sem ela, só pede JSON.
+            "format": schema if (schema and self.structured_output) else "json",
             "think": False,  # modelos com raciocínio (qwen3.5) gastam muito mais tokens e tempo sem ganho aqui
             "options": {"temperature": self.temperature, "num_ctx": self.num_ctx},
         }
@@ -71,8 +74,8 @@ class OllamaClient:
         logger.info("LLM %s respondeu em %.1fs | %s", self.model, time.perf_counter() - started, _usage(data))
         return (data.get("message") or {}).get("content", "")
 
-    def generate_json(self, system: str, prompt: str) -> dict[str, Any]:
-        return generate_json_with_retry(self._chat, system, prompt)
+    def generate_json(self, system: str, prompt: str, schema: dict[str, Any] | None = None) -> dict[str, Any]:
+        return generate_json_with_retry(self._chat, system, prompt, schema)
 
     # -- Embeddings ----------------------------------------------------------
     def embed(self, texts: list[str]) -> list[list[float]]:

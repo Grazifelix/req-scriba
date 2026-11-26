@@ -138,7 +138,8 @@ def version(v: dict) -> dict:
         "tipo_alteracao_rotulo": label_of(ChangeType, v["tipo_alteracao"]),
         "origem_alteracao": v["origem_alteracao"], "origem_alteracao_rotulo": label_of(ChangeOrigin, v["origem_alteracao"]),
         "originada_por_ia": v["origem_alteracao"] in (
-            ChangeOrigin.AI_GENERATION.value, ChangeOrigin.AI_SUGGESTION.value, ChangeOrigin.AI_SUGGESTION_EDITED.value),
+            ChangeOrigin.AI_GENERATION.value, ChangeOrigin.AI_SUGGESTION.value, ChangeOrigin.AI_SUGGESTION_EDITED.value,
+            ChangeOrigin.AI_CRITERIA.value),
         "historia": content.get("historia"), "conteudo": content, "evidencia_ids": v["evidencia_ids"],
         "responsavel": v["responsavel"], "sugestao_atualizacao_id": v["sugestao_atualizacao_id"],
         "observacao": v["observacao"], "data_hora": v["criado_em"],

@@ -64,6 +64,15 @@ Comando: `make test` (equivale a `pytest -q`). Os testes de API e de Chroma usam
 7. LLM citando rótulo inexistente não cria evidência; HU sem evidência é sinalizada.
 8. Documento sem texto extraível nunca é usado na geração.
 9. Contexto e consolidação nunca criam evidência fora do banco nem texto de HU sem fonte: itens de contexto sem trecho são descartados e a consolidação só aplica operações sobre textos já extraídos.
+10. A etapa `GERACAO_US_QUS` nunca grava critérios de aceitação (os que o modelo devolver são descartados e contados).
+11. A etapa `GERACAO_CRITERIOS_ACEITACAO` não altera a HU; sem base nas fontes, grava zero critérios e a lacuna `criterios_aceitacao`.
+12. Cada citação (de HU ou de critério) é conferida contra o próprio trecho citado; divergência, rótulo inexistente e critério sem fonte ficam sinalizados.
+13. Falha da etapa de critérios não perde as HU; o job registra cada etapa com status e duração, inclusive quando falha.
+14. Gerar critérios de uma HU aprovada → 409; a geração sob demanda cria nova versão e preserva a anterior.
+
+Cobertura: `tests/test_services_criteria.py` (pipeline, critérios, execução independente, API), `tests/test_llm_parsing.py`
+(fontes por afirmação, Dado/Quando/Então), `tests/test_llm_prompts.py` (templates versionados e contrato
+exemplo × schema) e `tests/test_integrations.py` (saída estruturada nos dois adaptadores).
 
 ## 6. Casos de erro
 

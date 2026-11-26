@@ -47,6 +47,10 @@ class Settings:
     llm_timeout: int = field(default_factory=lambda: _env_int("LLM_TIMEOUT", _env_int("OLLAMA_TIMEOUT", 900)))
     llm_temperature: float = field(default_factory=lambda: _env_float("LLM_TEMPERATURE", 0.1))
     llm_num_ctx: int = field(default_factory=lambda: _env_int("LLM_NUM_CTX", 16384))  # só no Ollama
+    # Saída estruturada: envia o JSON Schema do prompt ao provedor (Ollama `format`, OpenAI `json_schema`).
+    llm_structured_output: bool = field(default_factory=lambda: _env_bool("LLM_STRUCTURED_OUTPUT", False))
+    # Geração de critérios de aceitação: trechos relacionados (RAG) por história, além das evidências dela
+    criteria_related_chunks: int = field(default_factory=lambda: _env_int("CRITERIA_RELATED_CHUNKS", 2))
     embeddings_provider: str = field(default_factory=lambda: _env("EMBEDDINGS_PROVIDER", "ollama"))
     embeddings_base_url: str = field(default_factory=lambda: _env("EMBEDDINGS_BASE_URL", ""))
     embeddings_api_key: str = field(default_factory=lambda: _env("EMBEDDINGS_API_KEY", ""), repr=False)
@@ -73,6 +77,8 @@ class Settings:
     generation_context_pass: bool = field(default_factory=lambda: _env_bool("GENERATION_CONTEXT_PASS", True))
     generation_context_chars: int = field(default_factory=lambda: _env_int("GENERATION_CONTEXT_CHARS", 1200))
     generation_consolidation: bool = field(default_factory=lambda: _env_bool("GENERATION_CONSOLIDATION", True))
+    # Etapa de critérios de aceitação dentro do job de geração (desligada: gere depois, por história ou em lote)
+    generation_criteria: bool = field(default_factory=lambda: _env_bool("GENERATION_CRITERIA", True))
     cors_origins: list[str] = field(
         default_factory=lambda: [
             o.strip()

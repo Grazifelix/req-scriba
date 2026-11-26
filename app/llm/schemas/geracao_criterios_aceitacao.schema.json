@@ -1,0 +1,87 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "GERACAO_CRITERIOS_ACEITACAO",
+  "description": "Saída do prompt de critérios de aceitação para histórias já formuladas.",
+  "type": "object",
+  "required": ["historias", "lacunas_conjunto"],
+  "properties": {
+    "historias": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "criterios_aceitacao", "lacunas_criterios"],
+        "properties": {
+          "id": {"type": "string"},
+          "criterios_aceitacao": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["id", "titulo", "dado", "quando", "entao", "fontes", "informacoes_ausentes",
+                           "afirmacoes_sem_evidencia"],
+              "properties": {
+                "id": {"type": "string"},
+                "titulo": {"type": "string"},
+                "dado": {"type": "string"},
+                "quando": {"type": "string"},
+                "entao": {"type": "string"},
+                "fontes": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "required": ["trecho_id", "afirmacoes_sustentadas", "citacao"],
+                    "properties": {
+                      "trecho_id": {"type": "string"},
+                      "afirmacoes_sustentadas": {
+                        "type": "array",
+                        "items": {"type": "string", "enum": ["dado", "quando", "entao"]}
+                      },
+                      "citacao": {"type": "string"}
+                    }
+                  }
+                },
+                "informacoes_ausentes": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "required": ["elemento", "descricao"],
+                    "properties": {"elemento": {"type": "string"}, "descricao": {"type": "string"}}
+                  }
+                },
+                "afirmacoes_sem_evidencia": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "required": ["componente", "descricao"],
+                    "properties": {
+                      "componente": {"type": "string", "enum": ["dado", "quando", "entao"]},
+                      "descricao": {"type": "string"}
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "lacunas_criterios": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["elemento", "descricao"],
+              "properties": {"elemento": {"type": "string"}, "descricao": {"type": "string"}}
+            }
+          }
+        }
+      }
+    },
+    "lacunas_conjunto": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["historias", "descricao"],
+        "properties": {
+          "historias": {"type": "array", "items": {"type": "string"}},
+          "descricao": {"type": "string"}
+        }
+      }
+    }
+  }
+}

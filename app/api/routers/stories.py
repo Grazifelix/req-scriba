@@ -12,10 +12,11 @@ from app.db.unit_of_work import UnitOfWork
 from app.domain.enums import StoryStatus
 from app.schemas.common import ERROR_RESPONSES
 from app.schemas.stories import (
-    EvidenceList, GenerationRequest, RewriteApply, RewriteResult, StoryCreate, StoryList, StoryOut, StoryUpdate,
+    CriteriaGenerationRequest, EvidenceList, GenerationRequest, RewriteApply, RewriteResult, StoryCreate, StoryList, StoryOut, StoryUpdate,
     TraceabilityOut, VersionList, VersionOut,
 )
 from app.schemas.workflow import JobOut
+from app.services.criteria import CriteriaService, start_criteria_generation
 from app.services.generation import start_generation
 from app.services.stories import StoryService
 from app.workers import tasks
@@ -79,6 +80,34 @@ def update_story(historia_id: int, body: StoryUpdate, service: StoryService = De
 def apply_rewrite(historia_id: int, body: RewriteApply, uow: UnitOfWork = Depends(get_uow),
                   container: Container = Depends(get_container), actor: str = Depends(get_actor)):
     return StoryService(uow, container).apply_rewrite(historia_id, body.historia, actor)
+
+
+@router.post("/historias/{historia_id}/criterios/gerar", response_model=StoryOut, tags=["Critérios de aceitação"],
+             summary="Gerar critérios de aceitação de uma história",
+             description="Etapa GERACAO_CRITERIOS_ACEITACAO para uma história já gravada, a partir das evidências "
+                         "dela e de trechos relacionados. A história não é alterada; os critérios substituem os "
+                         "atuais numa nova versão (origem `geracao_criterios_ia`), e a versão anterior é preservada. "
+                         "Sem base nas fontes, nenhum critério é inventado: a lacuna fica em `informacoes_ausentes`. "
+                         "História aprovada → 409 (o LLM não altera histórias aprovadas); falha do LLM → 502.")
+def generate_criteria(historia_id: int, uow: UnitOfWork = Depends(get_uow),
+                      container: Container = Depends(get_container), actor: str = Depends(get_actor)):
+    return CriteriaService(uow, container).generate(historia_id, actor)
+
+
+@router.post("/projetos/{projeto_id}/criterios/gerar", response_model=JobOut, status_code=status.HTTP_202_ACCEPTED,
+             tags=["Critérios de aceitação"], summary="Gerar critérios de aceitação em lote",
+             description="Cria um job (`geracao_criterios`) que processa várias histórias por chamada ao LLM e grava "
+                         "cada lote assim que ele termina. Histórias aprovadas ou desaprovadas são ignoradas, assim "
+                         "como as que já têm critérios (a menos que `substituir` seja true).")
+def generate_criteria_batch(
+    projeto_id: int, background: BackgroundTasks, body: Optional[CriteriaGenerationRequest] = None,
+    uow: UnitOfWork = Depends(get_uow), container: Container = Depends(get_container), actor: str = Depends(get_actor),
+):
+    body = body or CriteriaGenerationRequest()
+    job = start_criteria_generation(uow, projeto_id, body.historia_ids, body.substituir, actor)
+    uow.commit()
+    background.add_task(tasks.run_criteria_generation, container, job["id"])
+    return job
 
 
 @router.post("/historias/{historia_id}/aprovar", response_model=StoryOut, summary="Aprovar história (US-06 CA02)")

@@ -1,0 +1,95 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "GERACAO_US_QUS",
+  "description": "Saída do prompt de geração de histórias de usuário (sem critérios de aceitação).",
+  "type": "object",
+  "required": ["historias", "lacunas_conjunto", "conflitos_identificados", "cobertura_funcional"],
+  "properties": {
+    "historias": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "funcionalidade_ref", "titulo", "perfil", "funcionalidade", "beneficio", "fontes",
+                     "informacoes_ausentes", "afirmacoes_sem_evidencia"],
+        "properties": {
+          "id": {"type": "string"},
+          "funcionalidade_ref": {"type": ["string", "null"]},
+          "titulo": {"type": "string"},
+          "perfil": {"type": ["string", "null"]},
+          "funcionalidade": {"type": "string"},
+          "beneficio": {"type": ["string", "null"]},
+          "fontes": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["trecho_id", "afirmacoes_sustentadas", "citacao"],
+              "properties": {
+                "trecho_id": {"type": "string"},
+                "afirmacoes_sustentadas": {
+                  "type": "array",
+                  "items": {"type": "string", "enum": ["perfil", "funcionalidade", "beneficio"]}
+                },
+                "citacao": {"type": "string"}
+              }
+            }
+          },
+          "informacoes_ausentes": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["elemento", "descricao"],
+              "properties": {"elemento": {"type": "string"}, "descricao": {"type": "string"}}
+            }
+          },
+          "afirmacoes_sem_evidencia": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["componente", "descricao"],
+              "properties": {
+                "componente": {"type": "string", "enum": ["perfil", "funcionalidade", "beneficio"]},
+                "descricao": {"type": "string"}
+              }
+            }
+          }
+        }
+      }
+    },
+    "lacunas_conjunto": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["tipo", "historias", "descricao"],
+        "properties": {
+          "tipo": {"type": "string", "enum": ["fluxo_incompleto", "duplicidade", "granularidade"]},
+          "historias": {"type": "array", "items": {"type": "string"}},
+          "descricao": {"type": "string"}
+        }
+      }
+    },
+    "conflitos_identificados": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["historias", "trechos", "descricao"],
+        "properties": {
+          "historias": {"type": "array", "items": {"type": "string"}},
+          "trechos": {"type": "array", "items": {"type": "string"}},
+          "descricao": {"type": "string"}
+        }
+      }
+    },
+    "cobertura_funcional": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["funcionalidade_ref", "historias", "observacao"],
+        "properties": {
+          "funcionalidade_ref": {"type": "string"},
+          "historias": {"type": "array", "items": {"type": "string"}},
+          "observacao": {"type": ["string", "null"]}
+        }
+      }
+    }
+  }
+}

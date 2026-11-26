@@ -28,6 +28,22 @@ def specs_for_labels(labels: list[str], sources: dict[str, list[dict]]) -> list[
     return specs
 
 
+def supported_claim(components: list[str]) -> str | None:
+    """Texto gravado em ``evidencias.afirmacao``: o que o trecho sustenta (ex.: "Sustenta: perfil, beneficio")."""
+    return f"Sustenta: {', '.join(components)}" if components else None
+
+
+def specs_for_entries(entries: list[dict], sources: dict[str, list[dict]]) -> list[dict]:
+    """Fontes citadas com o que cada uma sustenta → evidências sem trecho repetido (a 1ª citação vence)."""
+    specs, seen = [], set()
+    for entry in entries:
+        for chunk in sources.get(entry["rotulo"], []):
+            if chunk["id"] not in seen:
+                seen.add(chunk["id"])
+                specs.append(evidence_spec(chunk, supported_claim(entry.get("afirmacoes") or [])))
+    return specs
+
+
 def add_evidences(uow: UnitOfWork, story_id: int, specs: list[dict], origin: str) -> list[int]:
     """Registra evidências (sem duplicar o mesmo trecho na mesma história)."""
     existing = {e["trecho_id"] for e in uow.evidences.list_by_story(story_id) if e["trecho_id"]}

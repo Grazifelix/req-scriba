@@ -19,24 +19,30 @@ STRICT_JSON_REMINDER = (
 )
 LOCAL_HOSTS = {"localhost", "127.0.0.1", "::1"}
 
-ChatFunction = Callable[[list[dict[str, str]]], str]
+Schema = dict[str, Any]
+ChatFunction = Callable[[list[dict[str, str]], "Schema | None"], str]
 
 
 class LLMClient(Protocol):
-    def generate_json(self, system: str, prompt: str) -> dict[str, Any]: ...
+    def generate_json(self, system: str, prompt: str, schema: Schema | None = None) -> dict[str, Any]:
+        """``schema``: JSON Schema da resposta. O adaptador só o envia ao provedor quando a saída estruturada
+        está ligada (``REQSCRIBA_LLM_STRUCTURED_OUTPUT``); senão pede apenas JSON. A resposta é sempre
+        normalizada pelo código, com ou sem schema."""
+        ...
+
     def health(self) -> dict[str, Any]: ...
 
 
-def generate_json_with_retry(chat: ChatFunction, system: str, prompt: str) -> dict[str, Any]:
+def generate_json_with_retry(chat: ChatFunction, system: str, prompt: str, schema: Schema | None = None) -> dict[str, Any]:
     """Envia o prompt e devolve o objeto JSON da resposta (1 retentativa se inválido)."""
     messages = [{"role": "system", "content": system}, {"role": "user", "content": prompt}]
-    content = chat(messages)
+    content = chat(messages, schema)
     parsed = extract_json(content)
     if parsed is not None:
         return parsed
     logger.warning("LLM retornou JSON inválido; nova tentativa com instrução estrita")
     messages += [{"role": "assistant", "content": content}, {"role": "user", "content": STRICT_JSON_REMINDER}]
-    parsed = extract_json(chat(messages))
+    parsed = extract_json(chat(messages, schema))
     if parsed is None:
         raise ExternalServiceError("O modelo de linguagem não retornou um JSON válido após nova tentativa.")
     return parsed

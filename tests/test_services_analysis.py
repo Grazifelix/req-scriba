@@ -82,7 +82,7 @@ def test_analysis_job_saves_traceable_analysis_without_stories(container, projec
     job = analyze(container, project_id, [audio_id], [document_id])
     result = job["resultado"]
     assert job["status"] == "concluido" and result["modo"] == "chamada_unica" and result["analise_anterior_id"] is None
-    assert not container.llm.prompts_for("EXTRACAO_HISTORIAS")  # análise independente da geração
+    assert not container.llm.prompts_for("GERACAO_US_QUS")  # análise independente da geração
     [prompt] = container.llm.prompts_for("ANALISE_FONTES")
     assert "TODAS as fontes" in prompt and "NÃO escreva histórias" in prompt
     assert prompt.index("</fontes>") < prompt.index("### TAREFA") < prompt.index("ETAPA 1: Entender as fontes")
@@ -259,16 +259,16 @@ def test_generation_requires_approved_analysis(container, project_id, audio_id):
 
 def test_generation_uses_approved_analysis_and_links_stories(container, project_id, audio_id, document_id):
     container.llm.handlers["ANALISE_FONTES"] = analysis_response
-    container.llm.handlers["EXTRACAO_HISTORIAS"] = stories_response
+    container.llm.handlers["GERACAO_US_QUS"] = stories_response
     analysis_id = analyze(container, project_id, [audio_id], [document_id])["resultado"]["analise_id"]
     approve(container, analysis_id)
     result = generate(container, project_id, [audio_id], [document_id])["resultado"]
     assert result["analise_id"] == analysis_id and result["modo"] == "chamada_unica"
     assert not container.llm.prompts_for("CONTEXTO_REUNIAO") and not container.llm.prompts_for("CONSOLIDACAO_HISTORIAS")
 
-    [prompt] = container.llm.prompts_for("EXTRACAO_HISTORIAS")
+    [prompt] = container.llm.prompts_for("GERACAO_US_QUS")
     assert prompt.index("</fontes>") < prompt.index("ANALISE DO PROJETO:") < prompt.index("### TAREFA")
-    assert "ETAPA 1: Escrever as histórias" in prompt and "Entender as fontes" not in prompt
+    assert "ETAPA 2: Escrever as histórias" in prompt and "Entender as fontes" not in prompt
     assert '"analise"' not in prompt  # o formato de resposta não pede a análise
     project = prompt.split("ANALISE DO PROJETO:")[1].split("### TAREFA")[0]
     assert "Sistema: Sistema escolar de boletins" in project
