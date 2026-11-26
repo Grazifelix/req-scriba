@@ -92,8 +92,11 @@ TEMPLATES_DIR = Path(__file__).with_name("templates")
 @lru_cache(maxsize=None)
 def load_template(name: str) -> tuple[str, Template]:
     """Lê ``templates/<name>.md``: cabeçalho (``versao: x``) + ``---`` + corpo com placeholders ``$nome``."""
-    text = (TEMPLATES_DIR / f"{name}.md").read_text(encoding="utf-8")
-    header, _, body = text.partition("\n---\n")
+    # CRLF (checkout no Windows com core.autocrlf) é normalizado: o separador e o corpo não dependem do clone.
+    text = (TEMPLATES_DIR / f"{name}.md").read_text(encoding="utf-8").replace("\r\n", "\n")
+    header, separator, body = text.partition("\n---\n")
+    if not separator:
+        raise ValueError(f"Template {name} sem o separador '---' entre cabeçalho e corpo.")
     match = re.search(r"^versao:\s*(\S+)", header, flags=re.M)
     if not match:
         raise ValueError(f"Template {name} sem cabeçalho 'versao:'.")

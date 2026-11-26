@@ -68,3 +68,14 @@ def test_story_prompt_keeps_qus_definitions_in_order():
     text = prompts.story_generation_prompt([{"rotulo": "F1", "descricao": "d", "texto": "t"}])
     assert text.index("12. Independente") < text.index("13. Completa")
     assert "Mínima" in text and "etapa de critérios de aceitação" in text
+
+
+def test_template_loader_accepts_crlf_checkouts(tmp_path, monkeypatch):
+    (tmp_path / "t.md").write_bytes(b"versao: 9.9\r\nuso: teste\r\n---\r\nlinha $x\r\nfim\r\n")
+    monkeypatch.setattr(prompts, "TEMPLATES_DIR", tmp_path)
+    prompts.load_template.cache_clear()
+    try:
+        version, template = prompts.load_template("t")
+        assert version == "9.9" and template.substitute(x="1") == "linha 1\nfim\n"
+    finally:
+        prompts.load_template.cache_clear()
