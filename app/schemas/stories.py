@@ -163,6 +163,9 @@ class StoryOut(StorySummaryOut):
     sugestao_scriba: Optional[str]
     atualizacoes_pendentes: int
     versoes: list[VersionOut]
+    auditoria_evidencias: Optional[dict[str, Any]] = Field(
+        default=None, description="Auditoria semântica mais recente das evidências (componentes, critérios, resumo)"
+    )
 
 
 class EvidenceList(OutputModel):
