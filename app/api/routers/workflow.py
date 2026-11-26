@@ -14,7 +14,7 @@ from app.schemas.common import ERROR_RESPONSES
 from app.schemas.workflow import (
     AnalysisRequest, BatchEvaluationRequest, ComparisonOut, DefectList, EvaluationList, EvaluationOut, FollowupOut, JobList, JobOut,
     QualityOverviewOut, QuestionAnswer, QuestionGenerateOut, QuestionGenerateRequest, QuestionList, QuestionOut,
-    QuestionUpdate, SuggestionApprove, SuggestionEdit, SuggestionList, SuggestionOut,
+    QuestionUpdate, SuggestionApprove, SuggestionDecision, SuggestionEdit, SuggestionList, SuggestionOut,
 )
 from app.services.jobs import JobService
 from app.services.quality import QualityService, start_batch_evaluation
@@ -158,10 +158,11 @@ def analyze_updates(
             summary="Listar sugestões de atualização")
 def list_suggestions(
     projeto_id: int,
-    status_filter: Optional[Literal["pendente", "aprovada", "rejeitada"]] = Query(default=None, alias="status"),
+    status_filter: Optional[Literal["pendente", "aprovada", "rejeitada", "cancelada"]] = Query(default=None, alias="status"),
+    historia_id: Optional[int] = None,
     service: UpdateService = Depends(_updates),
 ):
-    return service.list(projeto_id, status_filter)
+    return service.list(projeto_id, status_filter, historia_id)
 
 
 @router.get("/sugestoes-atualizacao/{sugestao_id}", response_model=SuggestionOut, tags=["Atualizações"],
@@ -178,17 +179,32 @@ def edit_suggestion(sugestao_id: int, body: SuggestionEdit, service: UpdateServi
 
 @router.post("/sugestoes-atualizacao/{sugestao_id}/aprovar", response_model=SuggestionOut, tags=["Atualizações"],
              summary="Aprovar e aplicar sugestão (US-15 CA02/CA04)",
-             description="Aplica a alteração, cria nova versão (origem IA) e registra as novas evidências (US-18).")
+             description="Aplica a alteração, cria nova versão (origem IA) e registra as novas evidências (US-18). "
+                         "Confirmação só vincula as evidências. Nova necessidade recebe o código definitivo. "
+                         "409 `proposta_desatualizada` se a história mudou depois da proposta (confirme com "
+                         "`aceitar_desatualizada`); 409 `possivel_duplicidade` se a candidata repete uma história "
+                         "ativa (confirme com `aceitar_duplicidade`).")
 def approve_suggestion(sugestao_id: int, body: Optional[SuggestionApprove] = None,
                        service: UpdateService = Depends(_updates), actor: str = Depends(get_actor)):
-    changes = body.conteudo_proposto.model_dump(exclude_unset=True) if body and body.conteudo_proposto else None
-    return service.approve(sugestao_id, actor, changes)
+    body = body or SuggestionApprove()
+    changes = body.conteudo_proposto.model_dump(exclude_unset=True) if body.conteudo_proposto else None
+    return service.approve(sugestao_id, actor, changes, body.aceitar_desatualizada, body.aceitar_duplicidade)
 
 
 @router.post("/sugestoes-atualizacao/{sugestao_id}/rejeitar", response_model=SuggestionOut, tags=["Atualizações"],
              summary="Rejeitar sugestão (US-15 CA03)", description="A história atual é preservada.")
-def reject_suggestion(sugestao_id: int, service: UpdateService = Depends(_updates), actor: str = Depends(get_actor)):
-    return service.reject(sugestao_id, actor)
+def reject_suggestion(sugestao_id: int, body: Optional[SuggestionDecision] = None,
+                      service: UpdateService = Depends(_updates), actor: str = Depends(get_actor)):
+    return service.reject(sugestao_id, actor, body.motivo if body else None)
+
+
+@router.post("/sugestoes-atualizacao/{sugestao_id}/cancelar", response_model=SuggestionOut, tags=["Atualizações"],
+             summary="Cancelar sugestão",
+             description="A proposta deixa de valer sem julgamento de mérito (ex.: desatualizada). Fica preservada "
+                         "com o motivo. Só propostas pendentes (senão 409).")
+def cancel_suggestion(sugestao_id: int, body: Optional[SuggestionDecision] = None,
+                      service: UpdateService = Depends(_updates), actor: str = Depends(get_actor)):
+    return service.cancel(sugestao_id, actor, body.motivo if body else None)
 
 
 # -- Jobs -------------------------------------------------------------------

@@ -346,6 +346,12 @@ frontend usa esses campos para mostrar em quais fontes a IA se baseou.
   reclassificação, conflitos, alternativa, sinais de recuperação, id temporário e possíveis duplicidades). O
   resultado do job traz `por_categoria`, fontes analisadas e ignoradas, HU candidatas, analisadas, fora do limite e
   não afetadas, reclassificadas e descartadas. Regras de classificação e aprovação: D44 e D45.
+- **Versionamento e aprovação (Milestone 4):** cada versão traz `fontes` (fontes que motivaram a mudança),
+  `status_historia`, `evidencia_ids` e `criterio_ids`; a comparação entre versões está em
+  `GET /historias/{id}/versoes/comparacao`. Propostas: `pendente | aprovada | rejeitada | cancelada`, com
+  `motivo_decisao`; `desatualizada` no detalhe quando a HU mudou depois da proposta; aprovação de proposta
+  desatualizada ou de nova necessidade duplicada exige confirmação (`409` até lá). Desaprovar uma HU cancela as
+  propostas pendentes dela. Decisão: D46.
 - **Critérios sob demanda:** `POST /historias/{id}/criterios/gerar` (síncrono) e
   `POST /projetos/{id}/criterios/gerar` (job `geracao_criterios`; ignora HU aprovadas, desaprovadas e, sem
   `substituir`, as que já têm critérios). Os critérios novos substituem os atuais numa nova versão (origem

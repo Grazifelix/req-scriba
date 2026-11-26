@@ -94,7 +94,7 @@ class StoryRepository(BaseRepository):
 
 class VersionRepository(BaseRepository):
     table = "versoes_historia"
-    json_columns = ("conteudo", "evidencia_ids", "criterio_ids")
+    json_columns = ("conteudo", "evidencia_ids", "criterio_ids", "fontes")
 
     def list_by_story(self, story_id: int) -> list[dict[str, Any]]:
         return self._select("historia_id = ?", (story_id,), order="numero")

@@ -101,6 +101,8 @@ CREATE TABLE IF NOT EXISTS versoes_historia (
     conteudo TEXT NOT NULL,
     evidencia_ids TEXT NOT NULL DEFAULT '[]',
     criterio_ids TEXT NOT NULL DEFAULT '[]',
+    fontes TEXT NOT NULL DEFAULT '[]',
+    status_historia TEXT,
     responsavel TEXT NOT NULL,
     sugestao_atualizacao_id INTEGER,
     observacao TEXT,
@@ -231,7 +233,8 @@ CREATE TABLE IF NOT EXISTS sugestoes_atualizacao (
     criado_em TEXT NOT NULL,
     atualizado_em TEXT NOT NULL,
     versao_base INTEGER,
-    detalhes TEXT NOT NULL DEFAULT '{}'
+    detalhes TEXT NOT NULL DEFAULT '{}',
+    motivo_decisao TEXT
 );
 CREATE INDEX IF NOT EXISTS ix_sugestoes_projeto ON sugestoes_atualizacao(projeto_id, status);
 

@@ -61,10 +61,17 @@ class UpdateSuggestionRepository(BaseRepository):
     table = "sugestoes_atualizacao"
     json_columns = ("conteudo_atual", "conteudo_proposto", "evidencias", "fontes", "detalhes")
 
-    def list_by_project(self, project_id: int, status: str | None = None) -> list[dict[str, Any]]:
+    def list_by_project(self, project_id: int, status: str | None = None, story_id: int | None = None
+                        ) -> list[dict[str, Any]]:
+        where, params = "projeto_id = ?", [project_id]
         if status:
-            return self._select("projeto_id = ? AND status = ?", (project_id, status))
-        return self._select("projeto_id = ?", (project_id,))
+            where, params = where + " AND status = ?", params + [status]
+        if story_id is not None:
+            where, params = where + " AND historia_id = ?", params + [story_id]
+        return self._select(where, tuple(params))
+
+    def list_pending_for_story(self, story_id: int) -> list[dict[str, Any]]:
+        return self._select("historia_id = ? AND status = 'pendente'", (story_id,))
 
     def count_pending_for_story(self, story_id: int) -> int:
         row = self.conn.execute(

@@ -76,7 +76,9 @@ Comando: `make test` (equivale a `pytest -q`). Os testes de API e de Chroma usam
 
 18. Novas fontes: só fontes não processadas entram (salvo `reprocessar`); nenhuma HU é alterada antes da aprovação; as cinco categorias geram propostas com versão atual e proposta, evidências novas, justificativa e critérios afetados; reclassificação pelo código; nova HU sem duplicar o backlog, com id temporário e código definitivo só ao aprovar.
 
-Cobertura: `tests/test_services_updates.py` e `tests/test_domain_impact.py` (Milestone 3), `tests/test_traceability.py` (Milestone 2), `tests/test_db_migration.py` (tabela de critérios), `tests/test_services_criteria.py` (pipeline, critérios, execução independente, API), `tests/test_llm_parsing.py`
+19. Versões registram as fontes que motivaram a mudança e o status; a comparação mostra campos, critérios e evidências; proposta cancelada ou decidida não pode ser decidida de novo; proposta desatualizada só é aplicada com confirmação, preservando edições posteriores; nova necessidade é checada contra o backlog atual antes do código definitivo.
+
+Cobertura: `tests/test_versioning_approval.py` (Milestone 4), `tests/test_services_updates.py` e `tests/test_domain_impact.py` (Milestone 3), `tests/test_traceability.py` (Milestone 2), `tests/test_db_migration.py` (tabela de critérios), `tests/test_services_criteria.py` (pipeline, critérios, execução independente, API), `tests/test_llm_parsing.py`
 (fontes por afirmação, Dado/Quando/Então), `tests/test_llm_prompts.py` (templates versionados e contrato
 exemplo × schema) e `tests/test_integrations.py` (saída estruturada nos dois adaptadores).
 

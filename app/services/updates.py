@@ -37,7 +37,8 @@ from app.services.jobs import JobService, validate_sources
 from app.services.pipeline import StageLog
 from app.services.retrieval import describe_chunk, group_by_chars
 from app.services.stories import apply_content_change, build_content, create_story_record
-from app.services.versioning import create_version, snapshot
+from app.domain.criteria import criteria_content
+from app.services.versioning import create_version, same_content, snapshot
 from app.domain.traceability import INVALID_REFERENCE
 
 logger = logging.getLogger(__name__)
@@ -493,9 +494,9 @@ class UpdateService:
         if suggestion["status"] != SuggestionStatus.PENDING.value:
             raise ConflictError(f"A sugestão já foi decidida (status '{suggestion['status']}').")
 
-    def list(self, project_id: int, status: str | None = None) -> dict:
+    def list(self, project_id: int, status: str | None = None, story_id: int | None = None) -> dict:
         require_project(self.uow, project_id)
-        items = self.uow.suggestions.list_by_project(project_id, status)
+        items = self.uow.suggestions.list_by_project(project_id, status, story_id)
         return presenters.listing([self._present(s, with_comparison=False) for s in items])
 
     def get(self, suggestion_id: int) -> dict:
@@ -513,11 +514,17 @@ class UpdateService:
         })
         return self.get(suggestion_id)
 
-    def approve(self, suggestion_id: int, author: str, changes: dict[str, Any] | None = None) -> dict:
+    def approve(self, suggestion_id: int, author: str, changes: dict[str, Any] | None = None,
+                accept_outdated: bool = False, accept_duplicate: bool = False) -> dict:
         """US-15 CA02/CA04, US-18 CA01: aplica a proposta aprovada.
 
         Confirmação: só vincula as evidências novas. Demais categorias: aplica o conteúdo proposto (se mudou, cria
-        versão) e vincula as evidências. Nova necessidade: cria a história com código definitivo (US-…)."""
+        versão) e vincula as evidências. Nova necessidade: cria a história com código definitivo (US-…).
+
+        Proposta desatualizada (a história mudou depois dela) → 409 ``proposta_desatualizada``; com
+        ``accept_outdated``, aplica sobre a versão atual SÓ os campos que a proposta muda, preservando o que foi
+        alterado depois. Nova necessidade parecida demais com uma história ativa → 409 ``possivel_duplicidade``,
+        salvo ``accept_duplicate``."""
         if changes:
             self.edit(suggestion_id, changes)
         suggestion = self._get(suggestion_id)
@@ -531,7 +538,8 @@ class UpdateService:
                 raise ConflictError("A história desta sugestão não existe mais.")
             changed = None
             if suggestion["tipo"] != SuggestionType.CONFIRMATION.value or suggestion["editada"]:
-                changed = apply_content_change(self.uow, story, {k: proposal.get(k) for k in EDITABLE_FIELDS})
+                fields = self._fields_to_apply(suggestion, story, accept_outdated)
+                changed = apply_content_change(self.uow, story, fields) if fields else None
             add_evidences(self.uow, story["id"], suggestion["evidencias"], "atualizacao")
             if changed:
                 values["versao_aplicada"] = create_version(
@@ -539,6 +547,7 @@ class UpdateService:
                     note=suggestion["justificativa"],
                 )
         else:
+            self._check_duplicate(suggestion, accept_duplicate)
             values["historia_criada_id"] = create_story_record(
                 self.uow, suggestion["projeto_id"], proposal, origin="ia", change_type=ChangeType.AUTOMATIC,
                 change_origin=origin, author=author, evidence_specs=suggestion["evidencias"],
@@ -549,12 +558,66 @@ class UpdateService:
         self.uow.suggestions.update(suggestion_id, {**values, "decidido_por": author, "decidido_em": now, "atualizado_em": now})
         return self.get(suggestion_id)
 
-    def reject(self, suggestion_id: int, author: str) -> dict:
-        """US-15 CA03: a história é preservada."""
+    def _fields_to_apply(self, suggestion: dict, story: dict, accept_outdated: bool) -> dict[str, Any]:
+        proposal = suggestion["conteudo_proposto"]
+        if not is_outdated(suggestion, story):
+            return {k: proposal.get(k) for k in EDITABLE_FIELDS}
+        changed = proposal_changes(suggestion)
+        if not accept_outdated:
+            raise ConflictError(
+                "A história mudou depois desta proposta. Revise a comparação com a versão atual e aprove de novo "
+                "confirmando, ou cancele a proposta.",
+                {"motivo": "proposta_desatualizada", "versao_base": suggestion.get("versao_base"),
+                 "versao_atual": story["versao_atual"], "campos_propostos": list(changed),
+                 "comparacao_atual": presenters.comparison(snapshot(story), {**snapshot(story), **changed})},
+            )
+        return changed
+
+    def _check_duplicate(self, suggestion: dict, accept_duplicate: bool) -> None:
+        """Consolidação antes do código definitivo: o backlog pode ter mudado desde a análise."""
+        if accept_duplicate:
+            return
+        key = story_key(suggestion["conteudo_proposto"])
+        for story in self.uow.stories.list_active(suggestion["projeto_id"]):
+            score = similarity(f"{story['perfil'] or ''} {story['funcionalidade'] or ''}", key)
+            if score >= EXISTING_DUPLICATE_THRESHOLD:
+                raise ConflictError(
+                    f"A história candidata repete {story['codigo']}. Confirme para criar mesmo assim, ou cancele.",
+                    {"motivo": "possivel_duplicidade", "historia_id": story["id"], "codigo": story["codigo"],
+                     "similaridade": round(score, 2)},
+                )
+
+    def _decide(self, suggestion_id: int, status: SuggestionStatus, author: str, reason: str | None) -> dict:
         suggestion = self._get(suggestion_id)
         self._require_pending(suggestion)
         now = utc_now_iso()
         self.uow.suggestions.update(suggestion_id, {
-            "status": SuggestionStatus.REJECTED.value, "decidido_por": author, "decidido_em": now, "atualizado_em": now,
+            "status": status.value, "decidido_por": author, "decidido_em": now, "motivo_decisao": reason,
+            "atualizado_em": now,
         })
         return self.get(suggestion_id)
+
+    def reject(self, suggestion_id: int, author: str, reason: str | None = None) -> dict:
+        """US-15 CA03: o analista discorda da proposta; a história é preservada."""
+        return self._decide(suggestion_id, SuggestionStatus.REJECTED, author, reason)
+
+    def cancel(self, suggestion_id: int, author: str, reason: str | None = None) -> dict:
+        """A proposta deixa de valer sem julgamento de mérito (ex.: desatualizada, fonte errada). Fica preservada."""
+        return self._decide(suggestion_id, SuggestionStatus.CANCELLED, author, reason or "Cancelada pelo analista.")
+
+
+def proposal_changes(suggestion: dict) -> dict[str, Any]:
+    """Campos que a proposta muda em relação ao conteúdo da história quando ela foi gerada."""
+    base, proposal = suggestion["conteudo_atual"] or {}, suggestion["conteudo_proposto"]
+    changes = {k: proposal.get(k) for k in ("titulo", "perfil", "funcionalidade", "beneficio")
+               if normalize(base.get(k)) != normalize(proposal.get(k))}
+    if criteria_content(base.get("criterios_aceitacao")) != criteria_content(proposal.get("criterios_aceitacao")):
+        changes["criterios_aceitacao"] = proposal.get("criterios_aceitacao")
+    return changes
+
+
+def is_outdated(suggestion: dict, story: dict) -> bool:
+    """A história mudou depois da proposta: versão diferente da registrada ou conteúdo diferente do de então."""
+    if suggestion.get("versao_base") is not None and suggestion["versao_base"] != story["versao_atual"]:
+        return True
+    return bool(suggestion["conteudo_atual"]) and not same_content(suggestion["conteudo_atual"], story)

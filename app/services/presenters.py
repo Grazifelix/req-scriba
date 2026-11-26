@@ -142,7 +142,9 @@ def version(v: dict) -> dict:
             ChangeOrigin.AI_GENERATION.value, ChangeOrigin.AI_SUGGESTION.value, ChangeOrigin.AI_SUGGESTION_EDITED.value,
             ChangeOrigin.AI_CRITERIA.value),
         "historia": content.get("historia"), "conteudo": content, "evidencia_ids": v["evidencia_ids"],
-        "criterio_ids": v.get("criterio_ids") or [],
+        "criterio_ids": v.get("criterio_ids") or [], "fontes": v.get("fontes") or [],
+        "status_historia": v.get("status_historia"),
+        "status_historia_rotulo": label_of(StoryStatus, v["status_historia"]) if v.get("status_historia") else None,
         "responsavel": v["responsavel"], "sugestao_atualizacao_id": v["sugestao_atualizacao_id"],
         "observacao": v["observacao"], "data_hora": v["criado_em"],
     }
@@ -241,6 +243,12 @@ def comparison(current: dict | None, proposed: dict) -> dict:
     }
 
 
+def _outdated(sg: dict, s: dict) -> bool:
+    from app.services.updates import is_outdated  # import local: updates usa os presenters
+
+    return is_outdated(sg, s)
+
+
 def suggestion(sg: dict, s: dict | None, with_comparison: bool = True) -> dict:
     audio, documents = split_evidences(sg["evidencias"] or [], source_excerpt)
     data = {
@@ -255,7 +263,8 @@ def suggestion(sg: dict, s: dict | None, with_comparison: bool = True) -> dict:
         "versao_aplicada": sg["versao_aplicada"], "historia_criada_id": sg["historia_criada_id"],
         "job_id": sg["job_id"], "criado_em": sg["criado_em"], "atualizado_em": sg["atualizado_em"],
         "versao_base": sg.get("versao_base"), "versao_atual_historia": s["versao_atual"] if s else None,
-        "detalhes": sg.get("detalhes") or {},
+        "desatualizada": bool(s) and sg["status"] == SuggestionStatus.PENDING.value and _outdated(sg, s),
+        "motivo_decisao": sg.get("motivo_decisao"), "detalhes": sg.get("detalhes") or {},
     }
     if with_comparison:
         data["comparacao"] = comparison(sg["conteudo_atual"], sg["conteudo_proposto"])

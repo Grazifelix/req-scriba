@@ -145,6 +145,10 @@ class VersionOut(OutputModel):
     conteudo: dict[str, Any]
     evidencia_ids: list[int]
     criterio_ids: list[int] = Field(default_factory=list, description="Critérios vigentes nesta versão")
+    fontes: list[dict[str, Any]] = Field(
+        default_factory=list, description="Fontes que motivaram a versão: as das evidências vinculadas desde a anterior"
+    )
+    status_historia: Optional[str] = Field(default=None, description="Status da história quando a versão foi criada")
     responsavel: str
     data_hora: str
 

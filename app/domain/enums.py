@@ -38,6 +38,7 @@ class SuggestionStatus(LabeledEnum):
     PENDING = "pendente"
     APPROVED = "aprovada"
     REJECTED = "rejeitada"
+    CANCELLED = "cancelada"
 
 
 class SuggestionType(LabeledEnum):
@@ -121,6 +122,7 @@ LABELS: dict[Enum, str] = {
     SuggestionStatus.PENDING: "Pendente",
     SuggestionStatus.APPROVED: "Aprovada",
     SuggestionStatus.REJECTED: "Rejeitada",
+    SuggestionStatus.CANCELLED: "Cancelada",
     SuggestionType.COMPLEMENTS: "Complementa história existente",
     SuggestionType.CONTRADICTS: "Contradiz história existente",
     SuggestionType.NEW_REQUIREMENT: "Possível novo requisito",

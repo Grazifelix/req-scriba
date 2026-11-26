@@ -11,7 +11,7 @@ from app.db.unit_of_work import UnitOfWork
 from app.domain import story_format
 from app.domain.criteria import CRITERION_EXTRA_FIELDS, criteria_content, number_criteria
 from app.domain.text import normalize
-from app.domain.enums import ChangeOrigin, ChangeType, StoryStatus
+from app.domain.enums import ChangeOrigin, ChangeType, StoryStatus, SuggestionStatus
 from app.llm import parsing, prompts
 from app.services import presenters
 from app.services.common import require_project, require_story
@@ -134,6 +134,11 @@ def apply_content_change(uow: UnitOfWork, story: dict, changes: dict) -> dict | 
     return content
 
 
+def _criterion_brief(c: dict) -> dict:
+    return {"criterio_id": c["id"], "codigo": c["codigo"], "criterio": c["criterio"], "status": c["status"],
+            "versao_historia": c["versao_historia"]}
+
+
 def _criterion_trace(c: dict) -> dict:
     """Critério (vigente ou substituído) com a versão em que entrou e os trechos/evidências que o sustentam."""
     return {
@@ -234,11 +239,54 @@ class StoryService:
         data = self.container.llm.generate_json(prompts.SYSTEM, prompts.split_criteria_prompt(story, texts, blocks))
         return parsing.normalize_split_criteria(data, len(texts))
 
-    def set_status(self, story_id: int, status: StoryStatus) -> dict:
-        """US-06 CA02/CA03: aprovação e desaprovação (não criam versão de conteúdo)."""
+    def set_status(self, story_id: int, status: StoryStatus, author: str = "sistema") -> dict:
+        """US-06 CA02/CA03: aprovação e desaprovação (não criam versão de conteúdo).
+
+        Desaprovar cancela as propostas pendentes da história (preservadas com o motivo): a história sai do
+        backlog e as propostas sobre ela deixam de fazer sentido."""
         require_story(self.uow, story_id)
-        self.uow.stories.update(story_id, {"status": status.value, "atualizado_em": utc_now_iso()})
+        now = utc_now_iso()
+        self.uow.stories.update(story_id, {"status": status.value, "atualizado_em": now})
+        if status == StoryStatus.REJECTED:
+            for suggestion in self.uow.suggestions.list_pending_for_story(story_id):
+                self.uow.suggestions.update(suggestion["id"], {
+                    "status": SuggestionStatus.CANCELLED.value, "decidido_por": author, "decidido_em": now,
+                    "motivo_decisao": "História desaprovada.", "atualizado_em": now,
+                })
         return self.detail(story_id)
+
+    def compare_versions(self, story_id: int, de: int | None = None, para: int | None = None) -> dict:
+        """US-20: diferenças entre duas versões (sem parâmetros: a penúltima e a última).
+
+        Campos e texto do snapshot; critérios por id permanente (adicionados, removidos e mantidos) quando as
+        versões registram ``criterio_ids``; evidências adicionadas e removidas; e as versões intermediárias com
+        origem, responsável e fontes que motivaram cada mudança."""
+        story = require_story(self.uow, story_id)
+        versions = {v["numero"]: v for v in self.uow.versions.list_by_story(story_id)}
+        para = para or story["versao_atual"]
+        de = de or max(para - 1, 1)
+        old, new = self._version(story_id, de), self._version(story_id, para)
+        if de >= para:
+            raise BusinessValidationError("Informe uma versão 'de' anterior à versão 'para'.", {"de": de, "para": para})
+        criteria = {c["id"]: c for c in self.uow.criteria.list_by_story(story_id)}
+        evidences = {e["id"]: e for e in self.uow.evidences.list_by_story(story_id)}
+        old_c, new_c = old["criterio_ids"] or [], new["criterio_ids"] or []
+        return {
+            "historia_id": story_id, "de": de, "para": para,
+            "conteudo": presenters.comparison(old["conteudo"], new["conteudo"]),
+            "criterios": {
+                "registrados": bool(old_c or new_c),
+                "adicionados": [_criterion_brief(criteria[i]) for i in new_c if i not in old_c and i in criteria],
+                "removidos": [_criterion_brief(criteria[i]) for i in old_c if i not in new_c and i in criteria],
+                "mantidos": [_criterion_brief(criteria[i]) for i in new_c if i in old_c and i in criteria],
+            },
+            "evidencias": {
+                "adicionadas": [presenters.evidence(evidences[i]) for i in new["evidencia_ids"]
+                                if i not in old["evidencia_ids"] and i in evidences],
+                "removidas": [i for i in old["evidencia_ids"] if i not in new["evidencia_ids"]],
+            },
+            "alteracoes": [presenters.version(versions[n]) for n in range(de + 1, para + 1) if n in versions],
+        }
 
     def evidences(self, story_id: int, version_number: int | None = None) -> dict:
         """US-17: evidências atuais ou de uma versão específica (US-18 CA03)."""

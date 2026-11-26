@@ -118,9 +118,10 @@ def approve_story(historia_id: int, service: StoryService = Depends(_service)):
 
 
 @router.post("/historias/{historia_id}/desaprovar", response_model=StoryOut,
-             summary="Desaprovar história (US-06 CA03)", description="A história deixa de integrar o backlog.")
-def reject_story(historia_id: int, service: StoryService = Depends(_service)):
-    return service.set_status(historia_id, StoryStatus.REJECTED)
+             summary="Desaprovar história (US-06 CA03)",
+             description="A história deixa de integrar o backlog; as propostas pendentes sobre ela são canceladas.")
+def reject_story(historia_id: int, service: StoryService = Depends(_service), actor: str = Depends(get_actor)):
+    return service.set_status(historia_id, StoryStatus.REJECTED, actor)
 
 
 @router.get("/historias/{historia_id}/evidencias", response_model=EvidenceList, tags=["Rastreabilidade"],
@@ -208,6 +209,16 @@ def get_chunk(trecho_id: int, uow: UnitOfWork = Depends(get_uow)):
             summary="Histórico de versões (US-20)")
 def list_versions(historia_id: int, service: StoryService = Depends(_service)):
     return service.versions(historia_id)
+
+
+@router.get("/historias/{historia_id}/versoes/comparacao", tags=["Versões"],
+            summary="Comparar duas versões (US-20)",
+            description="Sem parâmetros, compara a penúltima com a última. Traz as diferenças de campos e texto, os "
+                        "critérios adicionados, removidos e mantidos (por id permanente), as evidências adicionadas "
+                        "e as versões intermediárias com origem, responsável e fontes que motivaram cada mudança.")
+def compare_versions(historia_id: int, de: Optional[int] = Query(default=None, ge=1),
+                     para: Optional[int] = Query(default=None, ge=1), service: StoryService = Depends(_service)):
+    return service.compare_versions(historia_id, de, para)
 
 
 @router.get("/historias/{historia_id}/versoes/{numero}", response_model=VersionOut, tags=["Versões"],

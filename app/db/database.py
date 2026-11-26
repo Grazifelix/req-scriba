@@ -18,6 +18,9 @@ NEW_COLUMNS = (
     ("versoes_historia", "criterio_ids", "TEXT NOT NULL DEFAULT '[]'"),
     ("sugestoes_atualizacao", "versao_base", "INTEGER"),
     ("sugestoes_atualizacao", "detalhes", "TEXT NOT NULL DEFAULT '{}'"),
+    ("versoes_historia", "fontes", "TEXT NOT NULL DEFAULT '[]'"),
+    ("versoes_historia", "status_historia", "TEXT"),
+    ("sugestoes_atualizacao", "motivo_decisao", "TEXT"),
 )
 OLD_SUGGESTION_TYPES = "'complementa', 'contradiz', 'novo_requisito')"
 NEW_SUGGESTION_TYPES = ("'complementa', 'contradiz', 'novo_requisito', 'confirmacao', 'complementacao', 'modificacao', "

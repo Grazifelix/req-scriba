@@ -149,6 +149,17 @@ class SuggestionApprove(InputModel):
     conteudo_proposto: Optional[SuggestionEdit] = Field(
         default=None, description="Edição final opcional aplicada antes da aprovação"
     )
+    aceitar_desatualizada: bool = Field(
+        default=False, description="A história mudou depois da proposta: aplicar mesmo assim só os campos que a "
+                                   "proposta altera, preservando o que mudou depois (sem isso → 409)."
+    )
+    aceitar_duplicidade: bool = Field(
+        default=False, description="Nova necessidade parecida com uma história ativa: criar mesmo assim (sem isso → 409)."
+    )
+
+
+class SuggestionDecision(InputModel):
+    motivo: Optional[LongText] = Field(default=None, description="Motivo da rejeição ou do cancelamento")
 
 
 class SuggestionOut(OutputModel):
