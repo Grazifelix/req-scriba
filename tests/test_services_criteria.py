@@ -347,3 +347,19 @@ def test_manual_edit_of_criteria_list_keeps_traceability_of_unchanged_criteria(c
     assert kept["origem"] == "ia"
     assert "fontes" not in edited and "origem" not in edited
     assert "fontes" not in added
+
+
+def test_stage_progress_is_visible_while_job_runs(container, project_id, audio_id):
+    seen = {}
+
+    def criteria(prompt):
+        with container.uow() as uow:
+            [job] = [j for j in uow.jobs.list_by_project(project_id) if j["tipo"] == "geracao_historias"]
+        seen["status"] = job["status"]
+        seen["etapas"] = [(s["etapa"], s["status"]) for s in job["resultado"]["etapas"]]
+        return default_criteria(prompt)
+    container.llm.handlers["GERACAO_CRITERIOS_ACEITACAO"] = criteria
+    generate(container, project_id, [audio_id])
+    assert seen["status"] == "processando"
+    assert seen["etapas"][-1] == ("geracao_criterios", "em_andamento")
+    assert all(status == "concluida" for _, status in seen["etapas"][:-1])

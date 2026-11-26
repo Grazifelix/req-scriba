@@ -316,7 +316,7 @@ frontend usa esses campos para mostrar em quais fontes a IA se baseou.
   derrubar as demais.
 - **Pipeline do job de geração:** `preparacao` → `geracao_us` → `consolidacao_us` → `validacao_us` →
   `geracao_criterios` → `validacao_criterios` → `persistencia`. Cada etapa registra `status`
-  (`concluida | erro | ignorada`) e `duracao_s` em `resultado.etapas`, inclusive quando o job falha. A etapa de
+  (`em_andamento | concluida | erro | ignorada`) e `duracao_s` em `resultado.etapas`, gravados a cada início e fim de etapa (a interface mostra a etapa atual) e mantidos quando o job falha. A etapa de
   critérios não é fatal: se falhar, as HU são gravadas sem critérios e com a lacuna. A v1 da HU já nasce com os
   critérios. `REQSCRIBA_GENERATION_CRITERIA=false` pula a etapa (gere depois, por HU ou em lote).
 - **Critérios sob demanda:** `POST /historias/{id}/criterios/gerar` (síncrono) e

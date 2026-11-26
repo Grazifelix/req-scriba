@@ -18,6 +18,7 @@ from typing import Any
 
 from app.core.container import Container
 from app.core.errors import AppError
+from app.core.time import utc_now_iso
 from app.db.unit_of_work import UnitOfWork
 from app.domain.enums import ChangeOrigin, ChangeType, JobStatus, JobType, SourceType
 from app.domain.text import similarity
@@ -243,7 +244,7 @@ def run_generation(container: Container, job_id: str) -> None:
             return
         JobService(uow).mark(job_id, JobStatus.PROCESSING)
     params, project_id = job["parametros"], job["projeto_id"]
-    stages = StageLog()
+    stages = StageLog(on_update=lambda current: _progress(container, job_id, current))
     try:
         with stages.run("preparacao") as stage:
             batches, existing, (analysis, text, fn_codes) = _prepare(container, project_id, params)
@@ -287,6 +288,12 @@ def run_generation(container: Container, job_id: str) -> None:
     except Exception as exc:
         logger.exception("Falha inesperada no job %s", job_id)
         _fail(container, job_id, f"Erro inesperado: {type(exc).__name__}", {"etapas": stages.stages})
+
+
+def _progress(container: Container, job_id: str, stages: list[dict]) -> None:
+    """Grava as etapas no resultado do job em andamento, para a interface mostrar a etapa atual."""
+    with container.uow() as uow:
+        uow.jobs.update(job_id, {"resultado": {"etapas": stages}, "atualizado_em": utc_now_iso()})
 
 
 def _fail(container: Container, job_id: str, message: str, result: dict | None) -> None:
