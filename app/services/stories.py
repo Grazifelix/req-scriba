@@ -134,6 +134,16 @@ def apply_content_change(uow: UnitOfWork, story: dict, changes: dict) -> dict | 
     return content
 
 
+def _criterion_trace(c: dict) -> dict:
+    """Critério (vigente ou substituído) com a versão em que entrou e os trechos/evidências que o sustentam."""
+    return {
+        "criterio_id": c["id"], "codigo": c["codigo"], "titulo": c["titulo"], "criterio": c["criterio"],
+        "status": c["status"], "origem": c["origem"], "versao_historia": c["versao_historia"],
+        "substituido_na_versao": c["substituido_na_versao"], "fontes": c["fontes"],
+        "afirmacoes_sem_evidencia": c["afirmacoes_sem_evidencia"],
+    }
+
+
 def _parse_or_fail(text: str) -> dict:
     parsed = story_format.parse_story_text(text)
     if parsed is None:
@@ -156,6 +166,7 @@ class StoryService:
             self.uow.versions.list_by_story(story_id),
             self.uow.evaluations.latest(story_id),
             self.uow.suggestions.count_pending_for_story(story_id),
+            self.uow.evidence_audits.latest(story_id),
         )
 
     def list(self, project_id: int, status: str | None = None) -> dict:
@@ -253,6 +264,7 @@ class StoryService:
                 "numero": v["numero"], "origem_alteracao": v["origem_alteracao"], "data_hora": v["criado_em"],
                 "evidencias": [evidences[i] for i in ids if i in evidences],
                 "novas_evidencia_ids": [i for i in ids if i not in previous_ids],
+                "criterio_ids": v.get("criterio_ids") or [],
             })
             previous_ids = set(ids)
         ordered = list(evidences.values())
@@ -268,6 +280,7 @@ class StoryService:
             "historia_id": story_id, "codigo": story["codigo"], "versao_atual": story["versao_atual"],
             "possui_suporte_documental": bool(ordered), "afirmacoes_sem_evidencia": story["afirmacoes_sem_evidencia"],
             "versoes": versions, "navegacao": navigation, "total_evidencias": len(ordered),
+            "criterios": [_criterion_trace(c) for c in self.uow.criteria.list_by_story(story_id)],
         }
 
     def _version(self, story_id: int, number: int) -> dict:

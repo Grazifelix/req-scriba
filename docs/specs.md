@@ -315,10 +315,26 @@ frontend usa esses campos para mostrar em quais fontes a IA se baseou.
   `informacoes_ausentes` (não muda o status da HU). HU ausente da resposta ou lote com falha → lacuna, sem
   derrubar as demais.
 - **Pipeline do job de geração:** `preparacao` → `geracao_us` → `consolidacao_us` → `validacao_us` →
-  `geracao_criterios` → `validacao_criterios` → `persistencia`. Cada etapa registra `status`
+  `geracao_criterios` → `validacao_criterios` → `persistencia` → `auditoria_evidencias`. Cada etapa registra `status`
   (`em_andamento | concluida | erro | ignorada`) e `duracao_s` em `resultado.etapas`, gravados a cada início e fim de etapa (a interface mostra a etapa atual) e mantidos quando o job falha. A etapa de
   critérios não é fatal: se falhar, as HU são gravadas sem critérios e com a lacuna. A v1 da HU já nasce com os
   critérios. `REQSCRIBA_GENERATION_CRITERIA=false` pula a etapa (gere depois, por HU ou em lote).
+- **Rastreabilidade (Milestone 2):** cada trecho (`trechos_fonte`) tem id permanente, fonte (`tipo_fonte`,
+  `fonte_id`, `nome_arquivo`) e localização; `GET /trechos/{id}` devolve a fonte original e onde o trecho é usado.
+  Evidência = cópia imutável do trecho na HU, com `afirmacoes_sustentadas` (perfil, funcionalidade, beneficio).
+  Critério → `fontes[{trecho_id, evidencia_id, afirmacoes_sustentadas}]`. Versão → `evidencia_ids` e
+  `criterio_ids`. `GET /historias/{id}/rastreabilidade` traz também os critérios, inclusive os substituídos.
+- **Validação estrutural** (`GET /historias/{id}/validacao-estrutural`, `GET /projetos/{id}/validacao-estrutural`):
+  problemas com `tipo` (`campo_obrigatorio`, `id_duplicado`, `criterio_duplicado`, `referencia_inexistente`,
+  `citacao_divergente`, `afirmacao_invalida`, `vinculo_invalido`, `sem_evidencia`), `severidade` (`erro | aviso`),
+  `alvo` (`historia | componente | evidencia | criterio | versao`) e `mensagem`. `valida` = nenhum erro.
+- **Auditoria semântica** (`### TAREFA: VALIDACAO_EVIDENCIAS`, template `validacao_evidencias.md`): classifica cada
+  componente e cada critério como `COMPATIVEL | PARCIALMENTE_COMPATIVEL | INCOMPATIVEL | INSUFICIENTE |
+  SEM_EVIDENCIA`, com a avaliação de cada trecho, os problemas, as partes do critério sem sustentação e uma
+  correção proposta opcional (só texto). Regras do código: sem trecho → `SEM_EVIDENCIA`; não avaliado ou valor
+  desconhecido → `INSUFICIENTE`; trecho fora dos vinculados → problema; resumo contado pelo código. Gravada em
+  `auditorias_evidencia`; revisão humana por item em `POST /auditorias-evidencias/{id}/revisoes`. Etapa
+  `auditoria_evidencias` ao fim do job de geração (não fatal).
 - **Critérios sob demanda:** `POST /historias/{id}/criterios/gerar` (síncrono) e
   `POST /projetos/{id}/criterios/gerar` (job `geracao_criterios`; ignora HU aprovadas, desaprovadas e, sem
   `substituir`, as que já têm critérios). Os critérios novos substituem os atuais numa nova versão (origem
@@ -454,6 +470,7 @@ Fakes: `FakeLLM` (roteia pelo marcador `### TAREFA:` do prompt), `FakeTranscribe
 | `REQSCRIBA_GENERATION_CONSOLIDATION` | `true` (passada de consolidação) |
 | `REQSCRIBA_GENERATION_CRITERIA` | `true` (etapa de critérios de aceitação dentro do job de geração) |
 | `REQSCRIBA_CRITERIA_RELATED_CHUNKS` | `2` (trechos relacionados por HU no prompt de critérios; `0` desliga) |
+| `REQSCRIBA_GENERATION_EVIDENCE_AUDIT` | `true` (auditoria semântica das evidências ao fim do job de geração) |
 | `REQSCRIBA_LLM_STRUCTURED_OUTPUT` | `false` (envia o JSON Schema do prompt ao provedor) |
 | `REQSCRIBA_CORS_ORIGINS` | `http://localhost:3000,http://localhost:5173` |
 | `REQSCRIBA_LOG_LEVEL` | `INFO` |

@@ -19,7 +19,7 @@ from tests.conftest import ensure_approved_analysis
 from tests.fakes import default_criteria
 
 STAGES = ["preparacao", "geracao_us", "consolidacao_us", "validacao_us", "geracao_criterios",
-          "validacao_criterios", "persistencia"]
+          "validacao_criterios", "persistencia", "auditoria_evidencias"]
 
 
 def generate(container, project_id, audio_ids=(), document_ids=()):

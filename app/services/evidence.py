@@ -8,12 +8,14 @@ from app.db.unit_of_work import UnitOfWork
 NO_SOURCE_CLAIM = "Nenhum trecho das fontes foi identificado como origem desta história."
 
 
-def evidence_spec(chunk: dict, claim: str | None = None) -> dict:
-    """Cópia imutável dos dados do trecho, usada para evidências e sugestões."""
+def evidence_spec(chunk: dict, claim: str | None = None, components: list[str] | None = None) -> dict:
+    """Cópia imutável dos dados do trecho, usada para evidências e sugestões.
+
+    ``components``: partes da história que o trecho sustenta (perfil, funcionalidade, beneficio)."""
     return {
         "trecho_id": chunk["id"], "tipo_fonte": chunk["tipo_fonte"], "fonte_id": chunk["fonte_id"],
         "nome_arquivo": chunk["nome_arquivo"], "trecho": chunk["texto"], "localizacao": chunk["localizacao"],
-        "afirmacao": claim,
+        "afirmacao": claim, "afirmacoes_sustentadas": list(components or []),
     }
 
 
@@ -40,7 +42,8 @@ def specs_for_entries(entries: list[dict], sources: dict[str, list[dict]]) -> li
         for chunk in sources.get(entry["rotulo"], []):
             if chunk["id"] not in seen:
                 seen.add(chunk["id"])
-                specs.append(evidence_spec(chunk, supported_claim(entry.get("afirmacoes") or [])))
+                components = entry.get("afirmacoes") or []
+                specs.append(evidence_spec(chunk, supported_claim(components), components))
     return specs
 
 
@@ -56,6 +59,7 @@ def add_evidences(uow: UnitOfWork, story_id: int, specs: list[dict], origin: str
             "historia_id": story_id, "tipo_fonte": spec["tipo_fonte"], "fonte_id": spec["fonte_id"],
             "nome_arquivo": spec["nome_arquivo"], "trecho_id": spec.get("trecho_id"), "trecho": spec["trecho"],
             "localizacao": spec["localizacao"], "afirmacao": spec.get("afirmacao"),
+            "afirmacoes_sustentadas": spec.get("afirmacoes_sustentadas") or [],
             "origem": spec.get("origem") or origin,  # cópia de outra história mantém a origem
             "criado_em": now,
         }))

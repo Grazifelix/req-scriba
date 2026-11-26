@@ -32,6 +32,7 @@ from app.services.candidates import (
 from app.services.criteria import (
     CriteriaOutcome, CriteriaTarget, apply_to_candidate, evidence_chunks, generate_criteria, related_for,
 )
+from app.services.evidence_audit import audit_and_save
 from app.services.pipeline import StageLog
 from app.services.consolidation import consolidate
 from app.services.context import MeetingContext
@@ -232,6 +233,25 @@ def _criteria_step(container: Container, stages: StageLog, project_id: int, cand
     return info["falhas"]
 
 
+def _audit_step(container: Container, stages: StageLog, created: list[int], job_id: str) -> dict[str, Any] | None:
+    """VALIDACAO_EVIDENCIAS das histórias gravadas (não fatal): audita os componentes e cada critério pelos seus
+    próprios trechos. Nada é alterado; o resultado fica em ``auditorias_evidencia`` para revisão."""
+    if not created:
+        stages.skip("auditoria_evidencias", "nenhuma história nova")
+        return None
+    if not container.settings.generation_evidence_audit:
+        stages.skip("auditoria_evidencias", "desligada (REQSCRIBA_GENERATION_EVIDENCE_AUDIT)")
+        return None
+    info: dict[str, Any] | None = None
+    with stages.run("auditoria_evidencias", fatal=False) as stage:
+        saved, failures, summary = audit_and_save(container, created, "geracao", job_id)
+        if not saved:
+            raise AppError("A auditoria das evidências falhou para todas as histórias.", {"falhas": failures})
+        info = {"auditorias": len(saved), "falhas": failures, "resumo": summary}
+        stage.update(auditorias=len(saved), falhas=len(failures))
+    return info
+
+
 def run_generation(container: Container, job_id: str) -> None:
     """Job de geração: preparação → GERACAO_US_QUS → consolidação das US → validação estrutural das US →
     GERACAO_CRITERIOS_ACEITACAO → validação estrutural dos critérios → persistência.
@@ -269,13 +289,14 @@ def run_generation(container: Container, job_id: str) -> None:
         with stages.run("persistencia") as stage:
             created = _persist(container, project_id, candidates, analysis)
             stage.update(historias_criadas=len(created))
+        audit = _audit_step(container, stages, created, job_id)
         result: dict[str, Any] = {
             "historias_criadas": created, "total": len(created), "lotes": len(batches),
             "modo": "chamada_unica" if single else "lotes", "lotes_com_erro": failures,
             "ignoradas_por_duplicidade": skipped, "analise_id": analysis["id"], "consolidacao": consolidation,
             "cobertura_funcional": coverage,
             "validacao": {"historias": story_validation, "criterios": criteria_validation},
-            "criterios": {"falhas": criteria_failures},
+            "criterios": {"falhas": criteria_failures}, "auditoria_evidencias": audit,
             "etapas": stages.stages, "duracao_total_s": stages.total_seconds(),
             "versoes_prompt": prompts.prompt_versions(),
             "mensagem": None if created else "Nenhuma nova necessidade funcional foi identificada nas fontes.",

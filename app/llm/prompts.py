@@ -118,6 +118,7 @@ QUS_SET = _block("_qus_conjunto")
 # Prompts mantidos em templates/*.md (versionados no cabeçalho de cada arquivo).
 STORY_GENERATION = "geracao_us_qus"
 CRITERIA_GENERATION = "geracao_criterios_aceitacao"
+EVIDENCE_AUDIT = "validacao_evidencias"
 
 
 SCHEMAS_DIR = Path(__file__).with_name("schemas")
@@ -130,11 +131,13 @@ def load_schema(name: str) -> dict[str, Any]:
 
 STORY_SCHEMA = load_schema(STORY_GENERATION)
 CRITERIA_SCHEMA = load_schema(CRITERIA_GENERATION)
+AUDIT_SCHEMA = load_schema(EVIDENCE_AUDIT)
 
 
 def prompt_versions() -> dict[str, str]:
     """Versões dos prompts em arquivo, registradas no resultado dos jobs (comparação entre execuções)."""
     names = {"GERACAO_US_QUS": STORY_GENERATION, "GERACAO_CRITERIOS_ACEITACAO": CRITERIA_GENERATION,
+             "VALIDACAO_EVIDENCIAS": EVIDENCE_AUDIT,
              "QUS_INDIVIDUAL": "_qus_individual", "QUS_CONJUNTO": "_qus_conjunto"}
     return {"geral": PROMPT_VERSION, **{task: template_version(name) for task, name in names.items()}}
 
@@ -243,6 +246,28 @@ def criteria_prompt(stories: list[str], blocks: list[dict[str, Any]], analysis_t
         fontes=format_sources(blocks), analise=_project_analysis_section(analysis_text),
         historias="\n\n".join(stories),
     )
+
+
+def _labels_text(labels: list[str]) -> str:
+    return ", ".join(labels) or "(nenhuma)"
+
+
+def audit_story_block(label: str, story: dict[str, Any], components: dict[str, list[str]],
+                      criteria: list[tuple[str, str, list[str]]]) -> str:
+    """História para VALIDACAO_EVIDENCIAS: cada componente e cada critério com os rótulos das SUAS evidências.
+
+    ``components``: componente → rótulos; ``criteria``: (id do critério, texto, rótulos)."""
+    lines = [f"[{label}] {story.get('historia')}", "Componentes:"]
+    for name, labels in components.items():
+        lines.append(f'- {name}: "{story.get(name)}" | evidências: {_labels_text(labels)}')
+    lines.append("Critérios:" if criteria else "Critérios: (nenhum)")
+    lines += [f"- [{ref}] {text} | evidências: {_labels_text(labels)}" for ref, text, labels in criteria]
+    return "\n".join(lines)
+
+
+def audit_prompt(stories: list[str], blocks: list[dict[str, Any]]) -> str:
+    """VALIDACAO_EVIDENCIAS: trechos (evidências) → histórias com os vínculos → instruções e formato."""
+    return load_template(EVIDENCE_AUDIT)[1].substitute(fontes=format_sources(blocks), historias="\n\n".join(stories))
 
 
 def context_prompt(blocks: list[dict[str, Any]]) -> str:

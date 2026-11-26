@@ -1,0 +1,69 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "VALIDACAO_EVIDENCIAS",
+  "description": "Saída da auditoria semântica das evidências (o resumo numérico é calculado pelo código).",
+  "type": "object",
+  "required": ["auditoria", "problemas_conjunto"],
+  "properties": {
+    "auditoria": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["historia_id", "componentes", "criterios_auditados"],
+        "properties": {
+          "historia_id": {"type": "string"},
+          "componentes": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["componente", "afirmacao", "resultado", "evidencias_avaliadas", "problemas_identificados",
+                           "correcao_proposta"],
+              "properties": {
+                "componente": {"type": "string", "enum": ["perfil", "funcionalidade", "beneficio"]},
+                "afirmacao": {"type": "string"},
+                "resultado": {"$ref": "#/$defs/resultado"},
+                "evidencias_avaliadas": {"type": "array", "items": {"$ref": "#/$defs/evidencia"}},
+                "problemas_identificados": {"type": "array", "items": {"type": "string"}},
+                "correcao_proposta": {"type": ["string", "null"]}
+              }
+            }
+          },
+          "criterios_auditados": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["criterio_id", "resultado", "evidencias_avaliadas", "componentes_sem_sustentacao",
+                           "problemas_identificados", "correcao_proposta"],
+              "properties": {
+                "criterio_id": {"type": "string"},
+                "resultado": {"$ref": "#/$defs/resultado"},
+                "evidencias_avaliadas": {"type": "array", "items": {"$ref": "#/$defs/evidencia"}},
+                "componentes_sem_sustentacao": {
+                  "type": "array", "items": {"type": "string", "enum": ["dado", "quando", "entao"]}
+                },
+                "problemas_identificados": {"type": "array", "items": {"type": "string"}},
+                "correcao_proposta": {"type": ["string", "null"]}
+              }
+            }
+          }
+        }
+      }
+    },
+    "problemas_conjunto": {"type": "array", "items": {"type": "string"}}
+  },
+  "$defs": {
+    "resultado": {
+      "type": "string",
+      "enum": ["COMPATIVEL", "PARCIALMENTE_COMPATIVEL", "INCOMPATIVEL", "INSUFICIENTE", "SEM_EVIDENCIA"]
+    },
+    "evidencia": {
+      "type": "object",
+      "required": ["trecho_id", "resultado", "justificativa"],
+      "properties": {
+        "trecho_id": {"type": "string"},
+        "resultado": {"$ref": "#/$defs/resultado"},
+        "justificativa": {"type": "string"}
+      }
+    }
+  }
+}

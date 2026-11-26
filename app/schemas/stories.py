@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Any, Literal, Optional
 
 from pydantic import Field
 
@@ -81,6 +81,19 @@ class CriteriaGenerationRequest(InputModel):
     )
 
 
+class EvidenceAuditRequest(InputModel):
+    historia_ids: list[int] = Field(
+        default_factory=list, max_length=500, description="Histórias a auditar; vazio = todas as ativas do projeto."
+    )
+
+
+class EvidenceAuditReview(InputModel):
+    item: str = Field(max_length=60, examples=["componente:funcionalidade", "criterio:12"],
+                      description="'componente:<perfil|funcionalidade|beneficio>' ou 'criterio:<criterio_id>'")
+    decisao: Literal["confirma", "contesta"] = Field(description="O analista confirma ou contesta o resultado do modelo")
+    observacao: Optional[LongText] = None
+
+
 class QualitySummary(OutputModel):
     porcentagem: float
     status: str
@@ -116,6 +129,11 @@ class EvidenceOut(OutputModel):
     nome_arquivo: str
     trecho: str
     origem: str = Field(description="extracao | atualizacao")
+    trecho_id: Optional[int] = Field(default=None, description="Trecho da fonte original (GET /trechos/{trecho_id})")
+    afirmacao: Optional[str] = None
+    afirmacoes_sustentadas: list[str] = Field(
+        default_factory=list, description="Partes da história que o trecho sustenta: perfil | funcionalidade | beneficio"
+    )
 
 
 class VersionOut(OutputModel):

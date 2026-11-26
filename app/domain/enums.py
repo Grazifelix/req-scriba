@@ -59,6 +59,7 @@ class JobType(LabeledEnum):
     SOURCE_ANALYSIS = "analise_fontes"
     QUALITY_EVALUATION = "avaliacao_qualidade"
     CRITERIA_GENERATION = "geracao_criterios"
+    EVIDENCE_AUDIT = "auditoria_evidencias"
 
 
 class SourceType(LabeledEnum):
@@ -124,6 +125,7 @@ LABELS: dict[Enum, str] = {
     JobType.SOURCE_ANALYSIS: "Análise das fontes",
     JobType.QUALITY_EVALUATION: "Avaliação de qualidade",
     JobType.CRITERIA_GENERATION: "Geração de critérios de aceitação",
+    JobType.EVIDENCE_AUDIT: "Auditoria das evidências",
     SourceType.AUDIO: "Áudio",
     SourceType.DOCUMENT: "Documento",
     ChangeType.MANUAL: "Manual",

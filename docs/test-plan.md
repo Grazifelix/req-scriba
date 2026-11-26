@@ -70,7 +70,11 @@ Comando: `make test` (equivale a `pytest -q`). Os testes de API e de Chroma usam
 13. Falha da etapa de critérios não perde as HU; o job registra cada etapa com status e duração, inclusive quando falha.
 14. Gerar critérios de uma HU aprovada → 409; a geração sob demanda cria nova versão e preserva a anterior.
 
-Cobertura: `tests/test_services_criteria.py` (pipeline, critérios, execução independente, API), `tests/test_llm_parsing.py`
+15. Critérios ficam em tabela própria: id permanente, versão da HU em que entraram, substituídos preservados; versões listam os critérios vigentes; a migração do JSON é idempotente e não altera a coluna antiga.
+16. Validação estrutural detecta trecho inexistente, citação divergente, ids duplicados, referências inválidas, campos obrigatórios e vínculos quebrados das versões, sem LLM.
+17. Auditoria semântica avalia cada componente e cada critério só pelos seus trechos; o código decide `SEM_EVIDENCIA` e nunca aceita como `COMPATIVEL` um item não avaliado ou com valor desconhecido; a HU não muda; a revisão humana fica registrada.
+
+Cobertura: `tests/test_traceability.py` (Milestone 2), `tests/test_db_migration.py` (tabela de critérios), `tests/test_services_criteria.py` (pipeline, critérios, execução independente, API), `tests/test_llm_parsing.py`
 (fontes por afirmação, Dado/Quando/Então), `tests/test_llm_prompts.py` (templates versionados e contrato
 exemplo × schema) e `tests/test_integrations.py` (saída estruturada nos dois adaptadores).
 

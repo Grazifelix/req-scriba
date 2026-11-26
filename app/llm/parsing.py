@@ -365,6 +365,83 @@ def normalize_extraction_result(data: dict[str, Any], valid_labels: set[str]) ->
     }
 
 
+# -- Auditoria semântica das evidências (VALIDACAO_EVIDENCIAS) --------------
+AUDIT_RESULTS = ("COMPATIVEL", "PARCIALMENTE_COMPATIVEL", "INCOMPATIVEL", "INSUFICIENTE", "SEM_EVIDENCIA")
+UNDECIDED = "INSUFICIENTE"
+
+
+def audit_result(value: Any) -> str:
+    """Classificação da auditoria; valor desconhecido vira INSUFICIENTE (nunca vira compatível)."""
+    key = _key(value).upper().replace("Í", "I").replace("Ê", "E")
+    if key.startswith("PARCIAL"):
+        return "PARCIALMENTE_COMPATIVEL"
+    if key.startswith("INCOMPAT"):
+        return "INCOMPATIVEL"
+    if key.startswith("SEM"):
+        return "SEM_EVIDENCIA"
+    if key.startswith("COMPAT"):
+        return "COMPATIVEL"
+    return UNDECIDED
+
+
+def _texts(value: Any, limit: int = 500) -> list[str]:
+    return [t for t in (_text(x, limit) for x in _as_list(value)) if t][:10]
+
+
+def _audited_evidences(value: Any, allowed: set[str]) -> tuple[list[dict[str, Any]], list[str]]:
+    """Trechos avaliados: só os rótulos vinculados ao item; os demais viram problema (referência indevida)."""
+    entries, invalid = [], []
+    for item in _as_list(value):
+        if not isinstance(item, dict):
+            continue
+        label = normalize_label(_pick(item, "trecho_id", "rotulo", "fonte"))
+        if label not in allowed:
+            invalid.append(_text(_pick(item, "trecho_id", "rotulo", "fonte"), 40) or "?")
+            continue
+        entries.append({"rotulo": label, "resultado": audit_result(_pick(item, "resultado", "result")),
+                        "justificativa": _text(_pick(item, "justificativa", "motivo"), 800)})
+    return entries, invalid
+
+
+def _audited_item(raw: dict, allowed: set[str]) -> dict[str, Any]:
+    entries, invalid = _audited_evidences(_pick(raw, "evidencias_avaliadas", "evidencias"), allowed)
+    problems = _texts(_pick(raw, "problemas_identificados", "problemas"))
+    problems += [f"Avaliou o trecho {label}, que não está vinculado a esta afirmação." for label in invalid]
+    return {
+        "resultado": audit_result(_pick(raw, "resultado", "result")), "evidencias_avaliadas": entries,
+        "problemas": problems, "correcao_proposta": _text(_pick(raw, "correcao_proposta", "correcao"), 1000),
+        "afirmacao": _text(_pick(raw, "afirmacao"), 500),
+        "componentes_sem_sustentacao": _components(_pick(raw, "componentes_sem_sustentacao"), CRITERION_COMPONENTS),
+    }
+
+
+def normalize_audit_result(data: dict[str, Any], items: dict[str, dict[str, set[str]]]) -> dict[str, Any]:
+    """``items``: ref da história → {"componentes": {nome: rótulos}, "criterios": {ref: rótulos}}.
+
+    Retorna, por história, os componentes e critérios avaliados pelo modelo (só ids conhecidos e só os trechos
+    vinculados a cada item). O que o modelo não devolveu fica de fora; o chamador decide como registrar."""
+    result: dict[str, dict[str, dict]] = {}
+    for raw in _as_list(_pick(data, "auditoria", "historias", "itens")):
+        if not isinstance(raw, dict):
+            continue
+        ref = _code(_pick(raw, "historia_id", "id", "historia"), "H")
+        if ref not in items or ref in result:
+            continue
+        expected = items[ref]
+        components = {}
+        for item in _as_list(_pick(raw, "componentes")):
+            name = _components(_pick(item, "componente") if isinstance(item, dict) else None, STORY_COMPONENTS)
+            if name and name[0] in expected["componentes"] and name[0] not in components:
+                components[name[0]] = _audited_item(item, expected["componentes"][name[0]])
+        criteria = {}
+        for item in _as_list(_pick(raw, "criterios_auditados", "criterios")):
+            cref = str(_pick(item, "criterio_id", "id", default="")).strip().upper() if isinstance(item, dict) else ""
+            if cref in expected["criterios"] and cref not in criteria:
+                criteria[cref] = _audited_item(item, expected["criterios"][cref])
+        result[ref] = {"componentes": components, "criterios": criteria}
+    return {"historias": result, "problemas_conjunto": _texts(_pick(data, "problemas_conjunto"))}
+
+
 # -- Critérios de aceitação (GERACAO_CRITERIOS_ACEITACAO) -------------------
 MAX_GENERATED_CRITERIA = 8
 _GHERKIN_PREFIX = {"dado": r"^(dado\s+(que\s+)?)", "quando": r"^(quando\s+)", "entao": r"^(ent[aã]o\s+)"}

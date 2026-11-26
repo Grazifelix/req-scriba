@@ -57,6 +57,28 @@ def default_criteria(prompt: str) -> dict[str, Any]:
     return {"historias": result, "lacunas_conjunto": []}
 
 
+def default_audit(prompt: str) -> dict[str, Any]:
+    """Tudo COMPATIVEL: cada componente e critério com os trechos que o prompt vinculou a ele."""
+    audit = []
+    for block in re.split(r"\n(?=\[H\d+\] )", prompt.split("HISTÓRIAS A AUDITAR:")[1].split("### TAREFA")[0].strip()):
+        ref = re.match(r"\[(H\d+)\]", block).group(1)
+        components = [
+            {"componente": name, "afirmacao": "x", "resultado": "COMPATIVEL", "problemas_identificados": [],
+             "evidencias_avaliadas": [{"trecho_id": l.strip(), "resultado": "COMPATIVEL", "justificativa": "ok"}
+                                      for l in labels.split(",") if l.strip().startswith("F")]}
+            for name, labels in re.findall(r"^- (perfil|funcionalidade|beneficio): .* \| evidências: (.*)$", block, flags=re.M)
+        ]
+        criteria = [
+            {"criterio_id": cref, "resultado": "COMPATIVEL", "componentes_sem_sustentacao": [],
+             "problemas_identificados": [],
+             "evidencias_avaliadas": [{"trecho_id": l.strip(), "resultado": "COMPATIVEL", "justificativa": "ok"}
+                                      for l in labels.split(",") if l.strip().startswith("F")]}
+            for cref, labels in re.findall(r"^- \[(H\d+-CA\d+)\] .* \| evidências: (.*)$", block, flags=re.M)
+        ]
+        audit.append({"historia_id": ref, "componentes": components, "criterios_auditados": criteria})
+    return {"auditoria": audit, "problemas_conjunto": []}
+
+
 def default_analysis(prompt: str) -> dict[str, Any]:
     return {"analise": {
         "sistema": "Sistema escolar de boletins",
@@ -125,6 +147,7 @@ class FakeLLM:
             "CONSOLIDACAO_HISTORIAS": default_consolidation,
             "GERACAO_US_QUS": default_extraction,
             "GERACAO_CRITERIOS_ACEITACAO": default_criteria,
+            "VALIDACAO_EVIDENCIAS": default_audit,
             "AVALIACAO_QUS_INDIVIDUAL": default_individual,
             "AVALIACAO_QUS_CONJUNTO": default_set,
             "PERGUNTAS_FOLLOWUP": default_questions,

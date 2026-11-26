@@ -106,6 +106,7 @@ def source_excerpt(e: dict) -> dict:
     base = {
         "tipo_fonte": e["tipo_fonte"], "nome_arquivo": e["nome_arquivo"], "trecho": e["trecho"],
         "trecho_id": e.get("trecho_id"), "afirmacao": e.get("afirmacao"),
+        "afirmacoes_sustentadas": e.get("afirmacoes_sustentadas") or [],
     }
     if e["tipo_fonte"] == SourceType.AUDIO.value:
         start = loc.get("inicio_segundos")
@@ -169,7 +170,19 @@ def story_summary(s: dict, rewrite: str | None = None) -> dict:
     }
 
 
-def story(s: dict, evidences: list[dict], versions: list[dict], latest_eval: dict | None, pending_updates: int) -> dict:
+def evidence_audit(a: dict, s: dict | None) -> dict:
+    """Auditoria semântica das evidências; ``desatualizada`` quando a história mudou depois dela."""
+    return {
+        "auditoria_id": a["id"], "historia_id": a["historia_id"], "versao_historia": a["versao_historia"],
+        "desatualizada": bool(s) and a["versao_historia"] != s["versao_atual"], "origem": a["origem"],
+        "job_id": a["job_id"], "componentes": a["componentes"], "criterios": a["criterios"],
+        "problemas_conjunto": a["problemas_conjunto"], "resumo": a["resumo"], "revisoes": a["revisoes"],
+        "modelo": a["modelo"], "versao_prompt": a["versao_prompt"], "data_hora": a["criado_em"],
+    }
+
+
+def story(s: dict, evidences: list[dict], versions: list[dict], latest_eval: dict | None, pending_updates: int,
+          latest_audit: dict | None = None) -> dict:
     audio_sources, document_sources = split_evidences(evidences)
     quality = None
     qus_block = None
@@ -195,6 +208,7 @@ def story(s: dict, evidences: list[dict], versions: list[dict], latest_eval: dic
         "informacoes_ausentes": s["informacoes_ausentes"], "criterios_qus": qus_block,
         "sugestao_scriba": s["sugestao_scriba"], "atualizacoes_pendentes": pending_updates,
         "versoes": [version(v) for v in versions], "criado_em": s["criado_em"],
+        "auditoria_evidencias": evidence_audit(latest_audit, s) if latest_audit else None,
     }
 
 

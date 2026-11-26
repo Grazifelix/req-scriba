@@ -118,6 +118,9 @@ class EvidenceRepository(BaseRepository):
             return []
         return self._select(f"id IN ({placeholders(len(ids))})", tuple(ids))
 
+    def list_by_chunk(self, chunk_id: int) -> list[dict[str, Any]]:
+        return self._select("trecho_id = ?", (chunk_id,))
+
 
 class EvidenceAuditRepository(BaseRepository):
     table = "auditorias_evidencia"

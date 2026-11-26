@@ -79,6 +79,8 @@ class Settings:
     generation_consolidation: bool = field(default_factory=lambda: _env_bool("GENERATION_CONSOLIDATION", True))
     # Etapa de critérios de aceitação dentro do job de geração (desligada: gere depois, por história ou em lote)
     generation_criteria: bool = field(default_factory=lambda: _env_bool("GENERATION_CRITERIA", True))
+    # Auditoria semântica das evidências (VALIDACAO_EVIDENCIAS) ao fim do job de geração
+    generation_evidence_audit: bool = field(default_factory=lambda: _env_bool("GENERATION_EVIDENCE_AUDIT", True))
     cors_origins: list[str] = field(
         default_factory=lambda: [
             o.strip()

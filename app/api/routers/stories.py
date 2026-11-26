@@ -12,13 +12,15 @@ from app.db.unit_of_work import UnitOfWork
 from app.domain.enums import StoryStatus
 from app.schemas.common import ERROR_RESPONSES
 from app.schemas.stories import (
-    CriteriaGenerationRequest, EvidenceList, GenerationRequest, RewriteApply, RewriteResult, StoryCreate, StoryList, StoryOut, StoryUpdate,
+    CriteriaGenerationRequest, EvidenceAuditRequest, EvidenceAuditReview, EvidenceList, GenerationRequest, RewriteApply, RewriteResult, StoryCreate, StoryList, StoryOut, StoryUpdate,
     TraceabilityOut, VersionList, VersionOut,
 )
 from app.schemas.workflow import JobOut
 from app.services.criteria import CriteriaService, start_criteria_generation
+from app.services.evidence_audit import EvidenceAuditService, start_evidence_audit
 from app.services.generation import start_generation
 from app.services.stories import StoryService
+from app.services.traceability import TraceabilityService
 from app.workers import tasks
 
 router = APIRouter(tags=["Histórias de Usuário"], responses=ERROR_RESPONSES)
@@ -132,6 +134,74 @@ def list_evidences(historia_id: int, versao: Optional[int] = Query(default=None,
             summary="Rastreabilidade por versão (US-17 CA04, US-18)")
 def traceability(historia_id: int, service: StoryService = Depends(_service)):
     return service.traceability(historia_id)
+
+
+@router.get("/historias/{historia_id}/validacao-estrutural", tags=["Rastreabilidade"],
+            summary="Validação estrutural da rastreabilidade de uma história",
+            description="Verifica por código, sem LLM: referências a trechos inexistentes, ids duplicados, citações "
+                        "que divergem do trecho atual da fonte, campos obrigatórios, critérios sem evidência ou "
+                        "citando trechos que não são evidência da história, e vínculos das versões. Não julga se o "
+                        "trecho sustenta a afirmação (isso é a auditoria semântica).")
+def validate_story_traceability(historia_id: int, uow: UnitOfWork = Depends(get_uow)):
+    return TraceabilityService(uow).validate_story(historia_id)
+
+
+@router.get("/projetos/{projeto_id}/validacao-estrutural", tags=["Rastreabilidade"],
+            summary="Validação estrutural de todas as histórias ativas do projeto",
+            description="Totais por tipo de problema; `itens` traz só as histórias com algum problema.")
+def validate_project_traceability(projeto_id: int, uow: UnitOfWork = Depends(get_uow)):
+    return TraceabilityService(uow).validate_project(projeto_id)
+
+
+@router.post("/historias/{historia_id}/auditoria-evidencias", tags=["Rastreabilidade"],
+             summary="Auditar semanticamente as evidências de uma história",
+             description="Prompt VALIDACAO_EVIDENCIAS: cada componente (perfil, funcionalidade, benefício) e cada "
+                         "critério é avaliado só pelos trechos vinculados a ele (COMPATIVEL, PARCIALMENTE_COMPATIVEL, "
+                         "INCOMPATIVEL, INSUFICIENTE, SEM_EVIDENCIA). A história não é alterada; o resultado fica "
+                         "registrado para revisão humana. Falha do LLM → 502.")
+def audit_story_evidence(historia_id: int, uow: UnitOfWork = Depends(get_uow),
+                         container: Container = Depends(get_container)):
+    return EvidenceAuditService(uow, container).audit(historia_id)
+
+
+@router.get("/historias/{historia_id}/auditorias-evidencias", tags=["Rastreabilidade"],
+            summary="Histórico das auditorias de evidências de uma história (mais recente primeiro)")
+def list_story_audits(historia_id: int, uow: UnitOfWork = Depends(get_uow)):
+    return EvidenceAuditService(uow).list(historia_id)
+
+
+@router.get("/auditorias-evidencias/{auditoria_id}", tags=["Rastreabilidade"], summary="Detalhar uma auditoria")
+def get_audit(auditoria_id: int, uow: UnitOfWork = Depends(get_uow)):
+    return EvidenceAuditService(uow).get(auditoria_id)
+
+
+@router.post("/auditorias-evidencias/{auditoria_id}/revisoes", tags=["Rastreabilidade"],
+             summary="Revisão humana de um item da auditoria",
+             description="O analista confirma ou contesta o resultado do modelo para um componente ou critério. "
+                         "Uma nova revisão do mesmo item substitui a anterior. A história não muda.")
+def review_audit(auditoria_id: int, body: EvidenceAuditReview, uow: UnitOfWork = Depends(get_uow),
+                 actor: str = Depends(get_actor)):
+    return EvidenceAuditService(uow).review(auditoria_id, body.item, body.decisao, body.observacao, actor)
+
+
+@router.post("/projetos/{projeto_id}/auditoria-evidencias", response_model=JobOut,
+             status_code=status.HTTP_202_ACCEPTED, tags=["Rastreabilidade"],
+             summary="Auditar as evidências de várias histórias (job auditoria_evidencias)")
+def audit_project_evidence(
+    projeto_id: int, background: BackgroundTasks, body: Optional[EvidenceAuditRequest] = None,
+    uow: UnitOfWork = Depends(get_uow), container: Container = Depends(get_container), actor: str = Depends(get_actor),
+):
+    job = start_evidence_audit(uow, projeto_id, (body or EvidenceAuditRequest()).historia_ids, actor)
+    uow.commit()
+    background.add_task(tasks.run_evidence_audit, container, job["id"])
+    return job
+
+
+@router.get("/trechos/{trecho_id}", tags=["Rastreabilidade"], summary="Fonte original de um trecho",
+            description="Arquivo, localização (página ou tempo, com link para o momento do áudio), texto atual e as "
+                        "histórias e critérios que usam o trecho como evidência.")
+def get_chunk(trecho_id: int, uow: UnitOfWork = Depends(get_uow)):
+    return TraceabilityService(uow).chunk(trecho_id)
 
 
 @router.get("/historias/{historia_id}/versoes", response_model=VersionList, tags=["Versões"],
