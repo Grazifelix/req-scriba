@@ -131,6 +131,27 @@ def _story_items(data: dict[str, Any]) -> list[Any]:
     return items if isinstance(items, list) else []
 
 
+_ANALYSIS_CODE_RE = re.compile(r"[(\[]?\b(?:RN|FN)\s*\d+\b[)\]]?", re.IGNORECASE)
+_LEFTOVER_WORDS = {"atender", "atende", "ao", "aos", "o", "os", "a", "as", "e", "de", "do", "da", "requisito",
+                   "requisitos", "negocio", "negócio", "funcionalidade", "conforme", "ver"}
+
+
+def _benefit(value: Any) -> str | None:
+    """Benefício sem códigos da análise: o modelo às vezes escreve "RN1" no lugar do texto do requisito.
+
+    "RN1: reduzir a espera" vira "reduzir a espera"; "RN1", "RN1 e RN2" ou "atender ao RN1" viram None
+    (benefício ausente, que a história sinaliza como informação faltante), nunca "para RN1".
+    """
+    text = clean_element(_text(value, 500))
+    if not text or not _ANALYSIS_CODE_RE.search(text):
+        return text
+    stripped = re.sub(r"\s+", " ", _ANALYSIS_CODE_RE.sub(" ", text)).strip(" .,;:-–—")
+    words = re.findall(r"\w+", stripped.lower())
+    if not words or all(w in _LEFTOVER_WORDS for w in words):
+        return None
+    return clean_element(stripped)
+
+
 def normalize_story(item: dict[str, Any], valid_labels: set[str]) -> dict[str, Any] | None:
     """Normaliza uma história candidata. Retorna None se não houver funcionalidade."""
     if not isinstance(item, dict):
@@ -138,7 +159,7 @@ def normalize_story(item: dict[str, Any], valid_labels: set[str]) -> dict[str, A
     funcionalidade = clean_element(_text(_pick(item, "funcionalidade", "acao", "action", "quero", "want", "meio"), 500))
     if not funcionalidade:
         return None
-    beneficio = clean_element(_text(_pick(item, "beneficio", "benefit", "para", "so_that", "fim", "objetivo"), 500))
+    beneficio = _benefit(_pick(item, "beneficio", "benefit", "para", "so_that", "fim", "objetivo"))
     return {
         "titulo": _text(_pick(item, "titulo", "title", "nome"), 200),
         "perfil": clean_element(_text(_pick(item, "perfil", "persona", "papel", "role", "ator", "como"), 200)),
@@ -164,6 +185,7 @@ ANALYSIS_ITEM_TYPES: dict[str, tuple[str, ...]] = {
     "usuario": ("usuarios", "usuários", "users", "perfis"),
     "requisito_negocio": ("requisitos_negocio", "requisitos_de_negocio", "requisitos_negócio", "business_requirements"),
     "funcionalidade": ("funcionalidades", "functional_requirements", "necessidades"),
+    "termo": ("termos", "glossario", "glossário", "terms"),
     "fora_de_escopo": ("fora_de_escopo", "out_of_scope", "nao_requisitos"),
 }
 ANALYSIS_CODE_PREFIX = {"requisito_negocio": "RN", "funcionalidade": "FN"}
@@ -175,6 +197,7 @@ _ITEM_FIELDS: dict[str, tuple[tuple[str, ...], tuple[str, ...]]] = {
     "usuario": (("papel", "perfil", "nome", "role", *TEXT_KEYS[1:]), ("descricao", "description")),
     "requisito_negocio": (TEXT_KEYS, ()),
     "funcionalidade": (TEXT_KEYS, ("usuario", "perfil", "user")),
+    "termo": (("termo", "term", "nome", *TEXT_KEYS), ("significado", "definicao", "definição", "meaning")),
     "fora_de_escopo": (TEXT_KEYS, ("motivo", "reason", "justificativa")),
 }
 

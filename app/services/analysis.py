@@ -1,5 +1,5 @@
 """Análise das fontes: como a IA entendeu a reunião (sistema, usuários, requisitos de negócio,
-funcionalidades e itens fora de escopo).
+funcionalidades, termos do domínio e itens fora de escopo).
 
 A análise é gerada por um job próprio (``app.services.source_analysis``), antes e independentemente da geração
 de histórias; com novas fontes, ela atualiza a análise mais recente e grava uma nova. O analista revisa, edita
@@ -151,26 +151,41 @@ REVIEWED_SECTIONS = [
     (AnalysisItemType.PARTICIPANT.value, "Participantes da reunião (não são perfis de história)"),
     (BUSINESS_REQUIREMENT, "Requisitos de negócio (use como benefício quando as fontes ligarem)"),
     (FUNCTIONALITY, "Funcionalidades já identificadas"),
+    (AnalysisItemType.TERM.value, "Termos do domínio (use estes significados; não os redefina)"),
     (AnalysisItemType.OUT_OF_SCOPE.value, "Fora de escopo (não gere histórias para estes itens)"),
 ]
 
 
-def _reviewed_line(item: dict) -> str:
-    code = f"{item['codigo']}: " if item["codigo"] else ""
-    if item["tipo"] == FUNCTIONALITY and item["complemento"]:
-        return f"- {code}({item['complemento']}) {item['texto']}"
+def _reviewed_line(item: dict, benefits: dict[str, str] | None) -> str:
+    """Linha de um item. ``benefits`` (código RN → texto) só nos prompts de histórias: os RN aparecem sem
+    código e cada FN traz o texto dos RN que atende, para o modelo escrever o benefício, nunca "RN1"."""
+    hide_code = benefits is not None and item["tipo"] == BUSINESS_REQUIREMENT
+    code = f"{item['codigo']}: " if item["codigo"] and not hide_code else ""
+    if item["tipo"] == FUNCTIONALITY:
+        user = f"({item['complemento']}) " if item["complemento"] else ""
+        served = [benefits[r] for r in item["referencias"] if r in benefits] if benefits else []
+        benefit = f" — benefício: {'; '.join(served)}" if served else ""
+        return f"- {code}{user}{item['texto']}{benefit}"
     extra = f" — {item['complemento']}" if item["complemento"] else ""
     return f"- {code}{item['texto']}{extra}"
 
 
-def analysis_text(uow: UnitOfWork, analysis: dict | None) -> str | None:
-    """Texto de uma análise para os prompts (ANALISE DO PROJETO / ANÁLISE ATUAL). None se vazia."""
+def analysis_text(uow: UnitOfWork, analysis: dict | None, for_stories: bool = False) -> str | None:
+    """Texto de uma análise para os prompts (ANALISE DO PROJETO / ANÁLISE ATUAL). None se vazia.
+
+    ``for_stories``: versão dos prompts que escrevem histórias (sem códigos RN; benefício junto de cada FN).
+    A atualização da análise usa a versão com códigos, que ela precisa manter.
+    """
     if not analysis:
         return None
     items = uow.analysis_items.list_by_analysis(analysis["id"])
+    benefits = (
+        {i["codigo"]: i["texto"] for i in items if i["tipo"] == BUSINESS_REQUIREMENT and i["codigo"]}
+        if for_stories else None
+    )
     lines = [f"Sistema: {analysis['sistema']}"] if analysis["sistema"] else []
     for kind, title in REVIEWED_SECTIONS:
-        group = [_reviewed_line(i) for i in items if i["tipo"] == kind]
+        group = [_reviewed_line(i, benefits) for i in items if i["tipo"] == kind]
         if group:
             lines += [f"{title}:", *group]
     return "\n".join(lines) or None

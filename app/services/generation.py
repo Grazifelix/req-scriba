@@ -1,12 +1,14 @@
 """Geração automática de Histórias de Usuário a partir das fontes selecionadas (US-05, US-16).
 
 Pré-requisito: uma análise das fontes aprovada pelo analista (app.services.source_analysis). Ela entra no
-prompt como ANALISE DO PROJETO, logo após as fontes e o contexto, e as histórias citam os códigos FN dela.
+prompt como ANALISE DO PROJETO, logo após as fontes, e as histórias citam os códigos FN dela. A análise aprovada
+é a visão do todo de cada lote (usuários, requisitos de negócio, funcionalidades, termos): por isso a geração
+não faz passada de contexto.
 Modo chamada única (as fontes cabem em GENERATION_BATCH_CHARS): o LLM lê todas as fontes de uma vez e escreve
-as histórias; não há passada de contexto nem consolidação.
-Modo lotes (fontes maiores): contexto prévio → lotes (transcrição + RAG de documentos) → extração por lote →
-deduplicação → consolidação. Nos dois modos: descarte do que já existe → HU + evidências + v1 → histórias
-ligadas às funcionalidades da análise.
+as histórias; não há consolidação.
+Modo lotes (fontes maiores): lotes (transcrição + RAG de documentos) → extração por lote → deduplicação →
+consolidação. Nos dois modos: descarte do que já existe → HU + evidências + v1 → histórias ligadas às
+funcionalidades da análise.
 """
 
 from __future__ import annotations
@@ -25,7 +27,7 @@ from app.services.candidates import (
     DUPLICATE_THRESHOLD, EXISTING_DUPLICATE_THRESHOLD, deduplicate, extract_batch, extract_candidates, story_key,
 )
 from app.services.consolidation import consolidate
-from app.services.context import MeetingContext, build_context
+from app.services.context import MeetingContext
 from app.services.indexing import source_key
 from app.services.jobs import JobService, validate_sources
 from app.services.retrieval import group_by_chars, related_chunks
@@ -115,15 +117,14 @@ def drop_existing(candidates: list[dict], existing: list[dict]) -> tuple[list[di
 
 
 def _extract_all(
-    container: Container, job_id: str, batches: list[list[dict]], context: MeetingContext | None,
-    analysis: str | None, fn_codes: set[str],
+    container: Container, job_id: str, batches: list[list[dict]], analysis: str | None, fn_codes: set[str],
 ) -> tuple[list[dict], list[dict]]:
     """Extrai cada lote; as candidatas guardam o código FN da análise que citaram (só códigos existentes)."""
     candidates, failures = [], []
     complete = len(batches) == 1
     for index, batch in enumerate(batches, start=1):
         try:
-            extracted = extract_batch(container, batch, context, analysis, complete)
+            extracted = extract_batch(container, batch, None, analysis, complete)
         except AppError as exc:
             logger.warning("Lote %d do job %s falhou: %s", index, job_id, exc.message)
             failures.append({"lote": index, "erro": exc.message})
@@ -145,14 +146,13 @@ def _prepare(container: Container, project_id: int, params: dict) -> tuple:
         analysis = approved_analysis(uow, project_id, params.get("analise_id"))
         chunks = source_chunks(uow, audio_ids, document_ids)
         existing = uow.stories.list_active(project_id)
-        text, fn_codes = analysis_text(uow, analysis), functionality_codes(uow, analysis["id"])
+        text, fn_codes = analysis_text(uow, analysis, for_stories=True), functionality_codes(uow, analysis["id"])
     if fits_in_one_call(container, chunks, text):
-        return [chunks], None, existing, (analysis, text, fn_codes)
-    context = build_context(container, chunks)
+        return [chunks], existing, (analysis, text, fn_codes)
     with container.uow() as uow:
-        budget = batch_budget(container, context, text)
+        budget = batch_budget(container, None, text)
         batches = build_batches(uow, container, project_id, audio_ids, document_ids, budget)
-    return batches, context, existing, (analysis, text, fn_codes)
+    return batches, existing, (analysis, text, fn_codes)
 
 
 def run_generation(container: Container, job_id: str) -> None:
@@ -164,9 +164,9 @@ def run_generation(container: Container, job_id: str) -> None:
         JobService(uow).mark(job_id, JobStatus.PROCESSING)
     params, project_id = job["parametros"], job["projeto_id"]
     try:
-        batches, context, existing, (analysis, text, fn_codes) = _prepare(container, project_id, params)
+        batches, existing, (analysis, text, fn_codes) = _prepare(container, project_id, params)
         single = len(batches) == 1
-        candidates, failures = _extract_all(container, job_id, batches, context, text, fn_codes)
+        candidates, failures = _extract_all(container, job_id, batches, text, fn_codes)
         candidates, consolidation = deduplicate(candidates), None
         if not single:  # na chamada única o modelo já viu o conjunto inteiro
             candidates, consolidation = consolidate(container, candidates)
@@ -184,8 +184,7 @@ def run_generation(container: Container, job_id: str) -> None:
             result: dict[str, Any] = {
                 "historias_criadas": created, "total": len(created), "lotes": len(batches),
                 "modo": "chamada_unica" if single else "lotes", "lotes_com_erro": failures,
-                "ignoradas_por_duplicidade": skipped, "analise_id": analysis["id"],
-                "contexto": context.summary() if context else None, "consolidacao": consolidation,
+                "ignoradas_por_duplicidade": skipped, "analise_id": analysis["id"], "consolidacao": consolidation,
                 "mensagem": None if created else "Nenhuma nova necessidade funcional foi identificada nas fontes.",
             }
             JobService(uow).mark(job_id, JobStatus.COMPLETED, result=result)

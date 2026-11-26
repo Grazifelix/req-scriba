@@ -199,7 +199,7 @@ CREATE INDEX IF NOT EXISTS ix_analises_projeto ON analises(projeto_id, id);
 CREATE TABLE IF NOT EXISTS itens_analise (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     analise_id INTEGER NOT NULL REFERENCES analises(id) ON DELETE CASCADE,
-    tipo TEXT NOT NULL CHECK (tipo IN ('participante', 'usuario', 'requisito_negocio', 'funcionalidade', 'fora_de_escopo')),
+    tipo TEXT NOT NULL CHECK (tipo IN ('participante', 'usuario', 'requisito_negocio', 'funcionalidade', 'termo', 'fora_de_escopo')),
     codigo TEXT,
     texto TEXT NOT NULL,
     complemento TEXT,

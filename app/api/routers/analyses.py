@@ -41,7 +41,7 @@ def generate_analysis(
 
 @router.get("/projetos/{projeto_id}/analises", response_model=AnalysisList, summary="Listar análises do projeto",
             description="Análises do projeto (mais recente primeiro), com sistema, participantes, usuários, "
-                        "requisitos de negócio, funcionalidades e itens fora de escopo.")
+                        "requisitos de negócio, funcionalidades, termos do domínio e itens fora de escopo.")
 def list_analyses(projeto_id: int, service: AnalysisService = Depends(_service)):
     return service.list(projeto_id)
 

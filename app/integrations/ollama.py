@@ -17,6 +17,19 @@ PROVIDER = "ollama"
 PROVIDER_LABEL = "Ollama"
 
 
+def _rate(tokens: int, duration_ns: int) -> str:
+    seconds = duration_ns / 1e9
+    return f"{tokens} tokens em {seconds:.1f}s ({tokens / seconds:.1f} tok/s)" if seconds > 0 else f"{tokens} tokens"
+
+
+def _usage(data: dict[str, Any]) -> str:
+    """Métricas da resposta do Ollama: carga do modelo, leitura do prompt e geração da saída (durações em ns)."""
+    load = (data.get("load_duration") or 0) / 1e9
+    prompt = _rate(data.get("prompt_eval_count") or 0, data.get("prompt_eval_duration") or 0)
+    output = _rate(data.get("eval_count") or 0, data.get("eval_duration") or 0)
+    return f"carga {load:.1f}s | entrada {prompt} | saída {output}"
+
+
 def _same_base_name(listed: str, model: str) -> bool:
     return listed == model or listed.split(":")[0] == model.split(":")[0]
 
@@ -55,7 +68,7 @@ class OllamaClient:
         }
         started = time.perf_counter()
         data = self._post("/api/chat", payload)
-        logger.info("LLM %s respondeu em %.1fs", self.model, time.perf_counter() - started)
+        logger.info("LLM %s respondeu em %.1fs | %s", self.model, time.perf_counter() - started, _usage(data))
         return (data.get("message") or {}).get("content", "")
 
     def generate_json(self, system: str, prompt: str) -> dict[str, Any]:

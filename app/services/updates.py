@@ -140,9 +140,11 @@ def run_update_analysis(container: Container, job_id: str) -> None:
                                                         container.settings.rag_top_k, keys)]
                 for s in stories
             }
-            reviewed = analysis_text(uow, uow.analyses.latest_reviewed(project_id))
-        # contexto só quando as fontes novas não cabem numa chamada; falhas não derrubam o job
-        context = None if fits_in_one_call(container, new_chunks, reviewed) else build_context(container, new_chunks)
+            reviewed = analysis_text(uow, uow.analyses.latest_reviewed(project_id), for_stories=True)
+        # A análise aprovada já dá a visão do todo: a passada de contexto só roda sem ela e quando as fontes novas
+        # não cabem numa chamada. Falhas da passada não derrubam o job.
+        needs_context = not reviewed and not fits_in_one_call(container, new_chunks, reviewed)
+        context = build_context(container, new_chunks) if needs_context else None
         drafts, confirmations, used, failures, attempts, consolidation = [], [], set(), [], 0, None
         for story in stories:
             if not related[story["id"]]:

@@ -56,6 +56,7 @@ def analysis_response(prompt):
         "requisitos_negocio": [{"id": "RN1", "descricao": "acompanhar o desempenho dos alunos", "fontes": ["F1"]}],
         "funcionalidades": [{"id": "FN1", "usuario": "coordenador pedagógico", "descricao": "emitir o boletim",
                              "requisitos_negocio": ["RN1"], "fontes": ["F1", "FN2"]}],
+        "termos": [{"termo": "boletim", "significado": "relatório bimestral de notas", "fontes": ["F1"]}],
         "fora_de_escopo": [{"descricao": "aprovar o cronograma", "motivo": "tarefa do projeto", "fontes": ["F9"]}],
     }}
 
@@ -92,7 +93,10 @@ def test_analysis_job_saves_traceable_analysis_without_stories(container, projec
     assert analysis["revisada"] is False and analysis["job_id"] == job["id"]
     assert {f["nome_arquivo"] for f in analysis["fontes"]} == {"reuniao.wav", "escopo.txt"}
     assert analysis["totais"] == {"participante": 1, "usuario": 1, "requisito_negocio": 1,
-                                  "funcionalidade": 1, "fora_de_escopo": 1}
+                                  "funcionalidade": 1, "termo": 1, "fora_de_escopo": 1}
+    [term] = items_of(analysis, "termo")
+    assert term["texto"] == "boletim" and term["complemento"] == "relatório bimestral de notas"
+    assert term["tipo_rotulo"] == "Termo do domínio" and term["codigo"] is None
     [functionality] = items_of(analysis, "funcionalidade")
     assert functionality["codigo"] == "FN1" and functionality["referencias"] == ["RN1"]
     assert functionality["complemento"] == "coordenador pedagógico" and functionality["historia_ids"] == []
@@ -269,7 +273,10 @@ def test_generation_uses_approved_analysis_and_links_stories(container, project_
     project = prompt.split("ANALISE DO PROJETO:")[1].split("### TAREFA")[0]
     assert "Sistema: Sistema escolar de boletins" in project
     assert "- coordenador pedagógico — acompanha o desempenho" in project
-    assert "- FN1: (coordenador pedagógico) emitir o boletim" in project
+    # sem código RN no prompt de histórias: o benefício vem como texto junto da FN
+    assert "- FN1: (coordenador pedagógico) emitir o boletim — benefício: acompanhar o desempenho dos alunos" in project
+    assert "RN1" not in project and "- acompanhar o desempenho dos alunos" in project
+    assert "Termos do domínio (use estes significados; não os redefina):\n- boletim — relatório bimestral de notas" in project
     assert "Fora de escopo (não gere histórias para estes itens):\n- aprovar o cronograma — tarefa do projeto" in project
 
     first, second = (detail(container, i) for i in result["historias_criadas"])

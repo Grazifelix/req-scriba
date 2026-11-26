@@ -151,9 +151,10 @@ revisada_por, revisada_em, criado_em, atualizado_em. Uma por execução do job d
 aprovada pelo analista, condição para gerar HU.
 
 ### 3.14 `itens_analise`
-id, analise_id, tipo (`participante|usuario|requisito_negocio|funcionalidade|fora_de_escopo`), codigo
+id, analise_id, tipo (`participante|usuario|requisito_negocio|funcionalidade|termo|fora_de_escopo`), codigo
 (`RN1..`/`FN1..`; NULL nos demais tipos), texto, complemento (papel na reunião · descrição do usuário ·
-usuário da funcionalidade · motivo de estar fora de escopo), referencias (JSON, só funcionalidades: códigos RN),
+usuário da funcionalidade · significado do termo, NULL se as fontes não o definem · motivo de estar fora de
+escopo), referencias (JSON, só funcionalidades: códigos RN),
 evidencias (JSON, cópias de trechos como em `sugestoes_atualizacao`), historia_ids (JSON, HU geradas a partir
 da funcionalidade), origem (`ia|manual`), editado (0/1), posicao, criado_em, atualizado_em.
 
@@ -219,7 +220,7 @@ União de: critérios QUS ≠ Atende da última avaliação (`qus:<criterio>`), 
   "id": 3, "projeto_id": 1, "job_id": "a1b2…", "origem": "ia", "sistema": "Pedidos por tablet na mesa",
   "fontes": [{"tipo_fonte": "audio", "fonte_id": 4, "nome_arquivo": "kickoff.mp3"}],
   "revisada": false, "revisada_por": null, "revisada_em": null,
-  "totais": {"participante": 2, "usuario": 1, "requisito_negocio": 1, "funcionalidade": 1, "fora_de_escopo": 1},
+  "totais": {"participante": 2, "usuario": 1, "requisito_negocio": 1, "funcionalidade": 1, "termo": 1, "fora_de_escopo": 1},
   "itens": [
     {"id": 10, "tipo": "funcionalidade", "tipo_rotulo": "Funcionalidade", "codigo": "FN1",
      "texto": "fazer pedidos pelo tablet da mesa", "complemento": "cliente", "referencias": ["RN1"],
@@ -315,23 +316,30 @@ frontend usa esses campos para mostrar em quais fontes a IA se baseou.
   informado ou a aprovada mais recente), senão `422`. Ela entra no prompt de histórias como "ANALISE DO
   PROJETO", descontada do orçamento dos lotes; não é fonte e não pode ser citada. Depois da criação das HU,
   cada funcionalidade dessa análise guarda os ids das HU que a citaram em `funcionalidade_ref`.
-- **Passada de contexto prévia** (`services/context.py`, `REQSCRIBA_GENERATION_CONTEXT_PASS`, só no modo lotes): antes da
-  extração, o LLM lê todas as fontes selecionadas em lotes (`### TAREFA: CONTEXTO_REUNIAO`) e lista perfis,
-  objetivos e termos, cada item citando rótulos `F`. Itens sem rótulo válido são descartados; itens
-  parecidos (≥ 0,85, mesmo tipo) são mesclados; perfis e objetivos têm prioridade até o limite
-  `REQSCRIBA_GENERATION_CONTEXT_CHARS`. Os itens recebem rótulos `R1..Rn` e entram em todos os prompts de
-  extração. Uma HU que cita `R#` recebe como evidência os trechos reais do item (até 3). O orçamento de cada
-  lote é reduzido pelo tamanho do contexto (piso: metade). Falhas são registradas e a extração segue sem contexto.
+- **Termos do domínio:** a análise das fontes lista, como itens `termo`, os termos que as fontes usam com
+  sentido próprio e o significado dado por elas (`complemento`; `null` quando a fonte não define o termo).
+  Na análise aprovada, eles entram na "ANALISE DO PROJETO" como "Termos do domínio".
+- **Passada de contexto prévia** (`services/context.py`, `REQSCRIBA_GENERATION_CONTEXT_PASS`, só no modo
+  lotes): usada pela análise das fontes e pela análise de novas fontes quando o projeto **não** tem análise
+  aprovada. A geração de HU não a usa: a análise aprovada (usuários, requisitos de negócio, funcionalidades e
+  termos) já dá a cada lote a visão do todo. O LLM lê as fontes em lotes (`### TAREFA: CONTEXTO_REUNIAO`) e
+  lista perfis, objetivos e termos, cada item citando rótulos `F`. Itens sem rótulo válido são descartados;
+  itens parecidos (≥ 0,85, mesmo tipo) são mesclados; perfis e objetivos têm prioridade até o limite
+  `REQSCRIBA_GENERATION_CONTEXT_CHARS`. Os itens recebem rótulos `R1..Rn` e entram nos prompts dos lotes. Um
+  item (de análise ou HU) que cita `R#` recebe como evidência os trechos reais do item (até 3). O orçamento de
+  cada lote é reduzido pelo tamanho do contexto (piso: metade). Falhas são registradas e o job segue sem contexto.
 - **Passada de consolidação** (`services/consolidation.py`, `REQSCRIBA_GENERATION_CONSOLIDATION`, só com mais de um lote): depois da
   deduplicação, o LLM recebe só as candidatas (`C1..Cn`, sem trechos) e devolve apenas operações
   (`### TAREFA: CONSOLIDACAO_HISTORIAS`): `fundir`, `preencher` (perfil/benefício ausente copiado
   literalmente de outra candidata, com as evidências dela; nunca sobrescreve) e `contradicoes` (lacuna
   `conflito` nas envolvidas; candidatas contraditórias nunca são fundidas). O código aplica as operações;
-  falha do LLM mantém as candidatas. O resultado do job traz `contexto` e `consolidacao` (`null` se desligadas).
+  falha do LLM mantém as candidatas. O resultado do job de geração traz `consolidacao` (`null` se desligada ou
+  em chamada única); o da análise de novas fontes traz também `contexto` (`null` quando não houve passada).
 - **Análise de atualização:** para cada HU não desaprovada, busca vetorial restrita às novas fontes
   (top-4) → LLM classifica `sem_relacao|complementa|contradiz` e propõe conteúdo. Trechos novos não
   citados por nenhuma HU passam pela extração → sugestões `novo_requisito` (descartando duplicatas ≥ 0,90).
-  O contexto prévio é construído sobre todas as novas fontes quando elas não cabem numa chamada, e a
+  Sem análise aprovada, o contexto prévio é construído sobre todas as novas fontes quando elas não cabem
+  numa chamada (com análise aprovada, não há passada de contexto), e a
   consolidação roda sobre as candidatas (com mais de um lote) antes do descarte de duplicatas. A análise
   aprovada mais recente entra no prompt como "ANALISE DO PROJETO"; para atualizar a análise com as novas
   fontes, use o job `analise_fontes`.
@@ -409,7 +417,7 @@ Fakes: `FakeLLM` (roteia pelo marcador `### TAREFA:` do prompt), `FakeTranscribe
 | `REQSCRIBA_TRANSCRIPT_WINDOW_CHARS` | `800` |
 | `REQSCRIBA_GENERATION_BATCH_CHARS` | `6000` (fontes até esse tamanho vão numa chamada única; para modelos de contexto grande, ex. `300000`) |
 | `REQSCRIBA_RAG_TOP_K` | `4` |
-| `REQSCRIBA_GENERATION_CONTEXT_PASS` | `true` (passada de contexto prévia) |
+| `REQSCRIBA_GENERATION_CONTEXT_PASS` | `true` (passada de contexto prévia: análise das fontes e novas fontes sem análise aprovada) |
 | `REQSCRIBA_GENERATION_CONTEXT_CHARS` | `1200` (limite do bloco de contexto nos prompts) |
 | `REQSCRIBA_GENERATION_CONSOLIDATION` | `true` (passada de consolidação) |
 | `REQSCRIBA_CORS_ORIGINS` | `http://localhost:3000,http://localhost:5173` |

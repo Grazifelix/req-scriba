@@ -113,9 +113,10 @@ em `GET {base}/models`. Confira o resultado em `GET /api/v1/health`.
   `reindexacao_pendente` e a busca não encontra os trechos já existentes.
 - **Atualizando uma instalação anterior:** rode `make reindex` uma vez, pois o índice agora é separado por modelo.
 - **Qualidade:** varia por modelo. Se a capacidade for diferente, ajuste `REQSCRIBA_GENERATION_BATCH_CHARS`.
-- **Tempo de geração:** a passada de contexto prévia e a consolidação final melhoram as HU, mas acrescentam
-  chamadas ao LLM. Para gerar mais rápido, desligue-as com `REQSCRIBA_GENERATION_CONTEXT_PASS=false` e
-  `REQSCRIBA_GENERATION_CONSOLIDATION=false`.
+- **Tempo de geração:** com fontes grandes (modo lotes), a consolidação final melhora as HU, mas acrescenta
+  uma chamada ao LLM; desligue-a com `REQSCRIBA_GENERATION_CONSOLIDATION=false`. A passada de contexto prévia
+  (`REQSCRIBA_GENERATION_CONTEXT_PASS`) só roda na análise das fontes e na análise de novas fontes sem análise
+  aprovada; a geração de HU usa a análise aprovada no lugar dela.
 - **Modelos com *thinking*:** prefira o provedor `ollama` para modelos do Ollama. Só ele envia `think: false`,
   e o `qwen3.5:4b` não respondeu em 240 s pela API `/v1`, contra 36 s pela API nativa.
 

@@ -8,15 +8,18 @@ from pydantic import Field
 
 from app.schemas.common import InputModel, LongText, OutputModel, ShortText
 
-ItemType = Literal["participante", "usuario", "requisito_negocio", "funcionalidade", "fora_de_escopo"]
+ItemType = Literal["participante", "usuario", "requisito_negocio", "funcionalidade", "termo", "fora_de_escopo"]
 
 
 class AnalysisItemCreate(InputModel):
-    tipo: ItemType = Field(description="participante | usuario | requisito_negocio | funcionalidade | fora_de_escopo")
-    texto: ShortText = Field(description="Nome, papel ou descrição, conforme o tipo", examples=["cliente"])
+    tipo: ItemType = Field(
+        description="participante | usuario | requisito_negocio | funcionalidade | termo | fora_de_escopo",
+    )
+    texto: ShortText = Field(description="Nome, papel, termo ou descrição, conforme o tipo", examples=["cliente"])
     complemento: Optional[ShortText] = Field(
         default=None,
-        description="Papel na reunião (participante), descrição (usuário), usuário (funcionalidade) ou motivo (fora de escopo)",
+        description="Papel na reunião (participante), descrição (usuário), usuário (funcionalidade), "
+                    "significado (termo) ou motivo (fora de escopo)",
     )
     referencias: list[str] = Field(
         default_factory=list, max_length=30,

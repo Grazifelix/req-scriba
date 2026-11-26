@@ -7,8 +7,10 @@ uma janela de transcrição por lote.
 import pytest
 
 from app.core.errors import ExternalServiceError
+from app.services.analysis import AnalysisService
 from app.services.consolidation import apply_operations
 from app.services.generation import run_generation, start_generation
+from app.services.source_analysis import run_source_analysis, start_source_analysis
 from app.services.stories import StoryService
 from app.services.updates import UpdateService, run_update_analysis, start_analysis
 from tests.conftest import ensure_approved_analysis, upload_document
@@ -55,32 +57,54 @@ def story(funcionalidade, perfil=None, beneficio=None, fontes=("F1",), criterios
 
 # ---------- passada de contexto ----------
 
-def test_context_items_are_citable_and_resolve_to_real_chunks(container, project_id, audio_id):
+def analyze_sources(container, project_id, audio_ids=(), document_ids=()):
+    with container.uow() as uow:
+        job = start_source_analysis(uow, project_id, list(audio_ids), list(document_ids), "ana")
+    run_source_analysis(container, job["id"])
+    with container.uow() as uow:
+        return uow.jobs.get(job["id"])
+
+
+def test_generation_in_batches_skips_context_pass(container, project_id, audio_id):
+    """A análise aprovada (com os termos) é a visão do todo de cada lote: não há passada de contexto."""
+    analysis_id = ensure_approved_analysis(container, project_id)
+    with container.uow() as uow:
+        AnalysisService(uow).add_item(analysis_id, {"tipo": "termo", "texto": "boletim", "complemento": "relatório de notas"})
+    job = generate(container, project_id, [audio_id])
+    assert job["status"] == "concluido" and job["resultado"]["modo"] == "lotes"
+    assert "contexto" not in job["resultado"]
+    assert not container.llm.prompts_for("CONTEXTO_REUNIAO")
+    for prompt in container.llm.prompts_for("EXTRACAO_HISTORIAS"):
+        assert "CONTEXTO GERAL" not in prompt and "- boletim — relatório de notas" in prompt
+
+
+def test_context_items_are_citable_in_source_analysis(container, project_id, audio_id):
     container.llm.handlers["CONTEXTO_REUNIAO"] = lambda p: {
         "perfis": [{"texto": "Coordenador pedagógico acompanha o desempenho dos alunos.", "fontes": ["F1"]}]
         if "boletim" in p else [],
         "termos": [{"texto": "Item inventado sem fonte", "fontes": ["F9"]}],
     }
-    container.llm.handlers["EXTRACAO_HISTORIAS"] = lambda p: {"historias": [
-        story("emitir o boletim da turma", "coordenador pedagógico", "acompanhar o desempenho", fontes=["R1"]),
-    ]}
-    job = generate(container, project_id, [audio_id])
+    container.llm.handlers["ANALISE_FONTES"] = lambda p: {"analise": {
+        "usuarios": [{"papel": "coordenador pedagógico", "fontes": ["R1"]}],
+    }}
+    job = analyze_sources(container, project_id, [audio_id])
     assert job["resultado"]["modo"] == "lotes"
     assert job["resultado"]["contexto"] == {"itens": 1, "lotes": 3, "lotes_com_erro": []}
-    prompt = container.llm.prompts_for("EXTRACAO_HISTORIAS")[0]
+    prompt = container.llm.prompts_for("ANALISE_FONTES")[0]
     assert "[R1] (perfil) Coordenador pedagógico" in prompt
     assert "Item inventado sem fonte" not in prompt  # item sem trecho válido é descartado
-    created = detail(container, job["resultado"]["historias_criadas"][0])
-    [evidence] = created["fontes_audio"]
-    assert evidence["audio_id"] == audio_id and "boletim" in evidence["trecho"]  # texto vem do banco
+    with container.uow() as uow:
+        [user] = AnalysisService(uow).detail(job["resultado"]["analise_id"])["itens"]
+    [evidence] = user["evidencias"]
+    assert evidence["tipo_fonte"] == "audio" and "boletim" in evidence["texto"]  # texto vem do banco
 
 
-def test_context_failure_does_not_fail_generation(container, project_id, audio_id):
+def test_context_failure_does_not_fail_source_analysis(container, project_id, audio_id):
     container.llm.handlers["CONTEXTO_REUNIAO"] = failing
-    job = generate(container, project_id, [audio_id])
-    assert job["status"] == "concluido" and job["resultado"]["total"] == 2
+    job = analyze_sources(container, project_id, [audio_id])
+    assert job["status"] == "concluido"
     assert len(job["resultado"]["contexto"]["lotes_com_erro"]) == 3
-    assert "CONTEXTO GERAL" not in container.llm.prompts_for("EXTRACAO_HISTORIAS")[0]
+    assert "CONTEXTO GERAL" not in container.llm.prompts_for("ANALISE_FONTES")[0]
 
 
 def test_context_reduces_batch_budget(container, project_id, audio_id):
@@ -136,7 +160,7 @@ def test_passes_can_be_disabled(container, project_id, audio_id):
     container.settings.generation_context_pass = False
     container.settings.generation_consolidation = False
     job = generate(container, project_id, [audio_id])
-    assert job["resultado"]["contexto"] is None and job["resultado"]["consolidacao"] is None
+    assert job["resultado"]["consolidacao"] is None
     assert not container.llm.prompts_for("CONTEXTO_REUNIAO")
     assert not container.llm.prompts_for("CONSOLIDACAO_HISTORIAS")
 
@@ -169,7 +193,7 @@ def existing_story(container, project_id, audio_id):
     return generate(container, project_id, [audio_id])["resultado"]["historias_criadas"][0]
 
 
-def test_new_requirements_use_context_and_consolidation(container, project_id, existing_story):
+def analyze_new_sources(container, project_id):
     container.llm.handlers["CONTEXTO_REUNIAO"] = lambda p: {
         "perfis": [{"texto": "Responsáveis acompanham a frequência dos alunos.", "fontes": ["F1"]}],
     }
@@ -186,7 +210,22 @@ def test_new_requirements_use_context_and_consolidation(container, project_id, e
     with container.uow() as uow:
         result = uow.jobs.get(job["id"])["resultado"]
         items = UpdateService(uow).list(project_id)["itens"]
-    assert result["contexto"]["itens"] == 1 and result["consolidacao"]["fusoes"] == 1
+    assert result["consolidacao"]["fusoes"] == 1
+    assert len([s for s in items if s["tipo"] == "novo_requisito"]) == 1
+    return result
+
+
+def test_new_requirements_use_approved_analysis_instead_of_context(container, project_id, existing_story):
+    result = analyze_new_sources(container, project_id)
+    assert result["contexto"] is None and not container.llm.prompts_for("CONTEXTO_REUNIAO")
+    prompt = container.llm.prompts_for("EXTRACAO_HISTORIAS")[-1]
+    assert "ANALISE DO PROJETO:" in prompt and "CONTEXTO GERAL" not in prompt
+
+
+def test_new_requirements_use_context_without_approved_analysis(container, project_id, existing_story):
+    with container.uow() as uow:
+        analysis = uow.analyses.latest_reviewed(project_id)
+        AnalysisService(uow).update(analysis["id"], {"revisada": False}, "ana")
+    result = analyze_new_sources(container, project_id)
+    assert result["contexto"]["itens"] == 1
     assert "[R1] (perfil)" in container.llm.prompts_for("EXTRACAO_HISTORIAS")[-1]
-    new_req = [s for s in items if s["tipo"] == "novo_requisito"]
-    assert len(new_req) == 1

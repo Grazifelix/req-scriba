@@ -57,6 +57,19 @@ def test_generate_json_success_uses_json_format():
     assert payload["think"] is False
 
 
+def test_generate_json_logs_token_usage(caplog):
+    c = client([FakeResponse({
+        "message": {"content": '{"ok": true}'}, "load_duration": 2_000_000_000,
+        "prompt_eval_count": 1000, "prompt_eval_duration": 4_000_000_000,
+        "eval_count": 300, "eval_duration": 10_000_000_000,
+    })])
+    with caplog.at_level("INFO", logger="app.integrations.ollama"):
+        c.generate_json("sys", "prompt")
+    assert "carga 2.0s" in caplog.text
+    assert "entrada 1000 tokens em 4.0s (250.0 tok/s)" in caplog.text
+    assert "saída 300 tokens em 10.0s (30.0 tok/s)" in caplog.text
+
+
 def test_generate_json_retries_once_on_invalid_json():
     c = client([FakeResponse({"message": {"content": "isto não é json"}}),
                 FakeResponse({"message": {"content": '{"ok": 1}'}})])

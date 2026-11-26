@@ -1,3 +1,5 @@
+import pytest
+
 from app.domain import qus
 from app.llm import parsing
 
@@ -124,6 +126,38 @@ def test_extraction_result_reads_analysis_citation_and_set_gaps():
     assert (functionality["codigo"], functionality["referencias"], functionality["fontes"]) == ("FN1", ["RN1"], ["F2"])
     assert items[("fora_de_escopo", "escolher as unidades do piloto")]["complemento"] == "decisão de projeto"
     assert len(analysis["itens"]) == 6  # item vazio descartado
+
+
+def test_analysis_reads_terms_with_and_without_meaning():
+    data = {"termos": [
+        {"termo": "OS", "significado": "ordem de serviço aberta pelo atendente", "fontes": ["F1", "F7"]},
+        {"termo": "ficha", "significado": None, "fontes": ["F2"]},
+        {"significado": "sem termo"},
+    ]}
+    terms = parsing.normalize_analysis(data, {"F1", "F2"})["itens"]
+    assert [(t["tipo"], t["texto"], t["complemento"], t["fontes"], t["codigo"]) for t in terms] == [
+        ("termo", "OS", "ordem de serviço aberta pelo atendente", ["F1"], None),
+        ("termo", "ficha", None, ["F2"], None),
+    ]
+
+
+@pytest.mark.parametrize("raw, expected", [
+    ("RN1", None),
+    ("rn 2", None),
+    ("RN1 e RN2", None),
+    ("atender ao RN1", None),
+    ("RN1: Reduzir o tempo de espera", "reduzir o tempo de espera"),
+    ("reduzir o tempo de espera (RN1)", "reduzir o tempo de espera"),
+    ("reduzir o tempo de espera", "reduzir o tempo de espera"),
+])
+def test_story_benefit_never_keeps_analysis_codes(raw, expected):
+    story = parsing.normalize_story({"funcionalidade": "cadastrar usuários", "beneficio": raw}, set())
+    assert story["beneficio"] == expected
+
+
+def test_analysis_system_keeps_paragraphs():
+    data = {"sistema": "O que é.\n  Segue   aqui.\n\n\nPor que importa."}
+    assert parsing.normalize_analysis(data, set())["sistema"] == "O que é. Segue aqui.\n\nPor que importa."
 
 
 def test_extraction_result_accepts_old_format():

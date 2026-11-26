@@ -83,6 +83,7 @@ class AnalysisItemType(LabeledEnum):
     USER = "usuario"
     BUSINESS_REQUIREMENT = "requisito_negocio"
     FUNCTIONALITY = "funcionalidade"
+    TERM = "termo"
     OUT_OF_SCOPE = "fora_de_escopo"
 
 
@@ -133,6 +134,7 @@ LABELS: dict[Enum, str] = {
     AnalysisItemType.USER: "Usuário do sistema",
     AnalysisItemType.BUSINESS_REQUIREMENT: "Requisito de negócio",
     AnalysisItemType.FUNCTIONALITY: "Funcionalidade",
+    AnalysisItemType.TERM: "Termo do domínio",
     AnalysisItemType.OUT_OF_SCOPE: "Fora de escopo",
 }
 
