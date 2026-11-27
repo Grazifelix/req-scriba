@@ -22,6 +22,17 @@ def test_set_prompt_only_lists_requested_criteria():
     assert "- complete: Completa" in text and "- unique:" not in text
 
 
+def test_set_prompt_comes_from_template_with_qus_rules_and_story_fields():
+    story = {**STORY, "perfil": "coordenador", "funcionalidade": "emitir o boletim", "beneficio": None}
+    text = prompts.set_evaluation_prompt(story, [{"codigo": "HU-02", "historia": "Como a, quero b, para c."}],
+                                         ["complete"], {"atomic": {"resultado": "Não atende", "evidencia": "duas ações"}})
+    assert "### TAREFA: AVALIACAO_QUS_CONJUNTO" in text and "$" not in text
+    assert "2. Atômica" in text  # mesmo bloco QUS da geração (_qus_individual.md)
+    assert "perfil = coordenador | funcionalidade = emitir o boletim | beneficio = (ausente)" in text
+    assert "- HU-02: Como a, quero b, para c." in text and "- [atomic] Não atende: duas ações" in text
+    assert prompts.prompt_versions()["AVALIACAO_QUS_CONJUNTO"]
+
+
 # -- Templates versionados e contrato com os JSON Schemas -------------------
 import json  # noqa: E402
 
@@ -50,6 +61,7 @@ def _format_example(template_name: str) -> dict:
 @pytest.mark.parametrize("name,schema", [
     (prompts.STORY_GENERATION, prompts.STORY_SCHEMA), (prompts.CRITERIA_GENERATION, prompts.CRITERIA_SCHEMA),
     (prompts.EVIDENCE_AUDIT, prompts.AUDIT_SCHEMA), (prompts.IMPACT_SOURCES, prompts.IMPACT_SCHEMA),
+    (prompts.SET_EVALUATION, prompts.SET_EVALUATION_SCHEMA),
 ])
 def test_prompt_response_example_matches_its_schema(name, schema):
     assert _required_keys_present(schema, _format_example(name)) == []

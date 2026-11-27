@@ -11,7 +11,7 @@ import re
 from typing import Any
 
 from app.domain import qus
-from app.domain.story_format import clean_element, lower_first
+from app.domain.story_format import build_story_text, clean_element, lower_first, parse_story_text, split_story_texts
 
 MAX_TEXT = 2000
 
@@ -616,9 +616,42 @@ def normalize_individual_evaluation(data: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+_WANT_PREFIX_RE = re.compile(r"^(?:eu\s+)?(?:quero|gostaria\s+de|preciso\s+de|desejo)\s+", re.IGNORECASE)
+_BENEFIT_PREFIX_RE = re.compile(r"^(?:para(?:\s+que)?|a\s+fim\s+de)\s+(?:(?:eu|ele|ela)\s+)?(?:possa[m]?\s+)?",
+                                re.IGNORECASE)
+# Fim da frase da história: o que vem depois (". A especificação …") é explicação do modelo, não história.
+_SENTENCE_END_RE = re.compile(r"\.\s+(?=[A-ZÀ-Ú])")
+
+
+def _rewrite_part(item: Any) -> dict[str, str | None] | None:
+    """Uma história da reescrita: campos {perfil, funcionalidade, beneficio} ou, se o modelo escrever a frase,
+    o texto no padrão "Como …, quero …, para …" (só a primeira frase). None se não houver funcionalidade."""
+    if isinstance(item, dict):
+        fields = {"perfil": _text(_pick(item, "perfil", "persona", "papel", "como"), 200),
+                  "funcionalidade": _text(_pick(item, "funcionalidade", "acao", "quero"), 500),
+                  "beneficio": _text(_pick(item, "beneficio", "benefício", "para"), 500)}
+    else:
+        text = _text(item)
+        fields = parse_story_text(_SENTENCE_END_RE.split(text)[0]) if text else None
+        if fields is None:
+            return None
+    action = clean_element(_WANT_PREFIX_RE.sub("", fields["funcionalidade"] or ""))
+    if not action:
+        return None
+    return {"perfil": clean_element(fields["perfil"]), "funcionalidade": lower_first(action),
+            "beneficio": lower_first(_benefit(_BENEFIT_PREFIX_RE.sub("", fields["beneficio"] or "")))}
+
+
 def normalize_rewrite(data: dict[str, Any]) -> str | None:
-    """Reescrita sugerida ao final da avaliação de conjunto (None se vazia)."""
-    return _text(_pick(data, "reescrita_sugerida", "reescrita", "rewrite", "sugestao"))
+    """Reescrita sugerida ao final da avaliação de conjunto, montada pelo código no padrão do backlog:
+    uma história ou "H1: Como …; H2: Como …" na divisão. None se vazia ou sem nenhuma parte válida."""
+    value = _pick(data, "reescrita_sugerida", "reescrita", "rewrite", "sugestao")
+    items = split_story_texts(value) if isinstance(value, str) else _as_list(value)
+    parts = [p for p in (_rewrite_part(i) for i in items) if p]
+    texts = list(dict.fromkeys(build_story_text(**p) for p in parts))
+    if len(texts) <= 1:
+        return texts[0] if texts else None
+    return "; ".join(f"H{i}: {t.rstrip('.')}" for i, t in enumerate(texts, start=1))
 
 
 def normalize_split_criteria(data: dict[str, Any], total: int) -> list[list[dict[str, str]]]:

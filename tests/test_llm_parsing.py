@@ -261,3 +261,29 @@ def test_criteria_result_ignores_unknown_stories_and_caps_criteria():
     assert set(result["historias"]) == {"H1"}
     assert len(result["historias"]["H1"]["criterios"]) == parsing.MAX_GENERATED_CRITERIA
     assert result["historias"]["H1"]["lacunas"] == [{"elemento": "regras", "descricao": "falta"}]
+
+
+# -- Reescrita sugerida da avaliação de conjunto ------------------------------
+def test_rewrite_fields_are_assembled_in_backlog_template():
+    data = {"reescrita_sugerida": [{"perfil": "Cliente", "funcionalidade": "Quero pagar a conta",
+                                    "beneficio": "para que eu possa reduzir a espera"}]}
+    assert parsing.normalize_rewrite(data) == "Como Cliente, quero pagar a conta, para reduzir a espera."
+
+
+def test_rewrite_split_is_numbered_and_missing_benefit_is_not_invented():
+    data = {"reescrita_sugerida": [{"perfil": "gerente", "funcionalidade": "ver as falhas", "beneficio": None},
+                                   {"perfil": "gerente", "funcionalidade": "ver as paradas", "beneficio": "RN2"}]}
+    assert parsing.normalize_rewrite(data) == (
+        "H1: Como gerente, quero ver as falhas, para [A DEFINIR: benefício]; "
+        "H2: Como gerente, quero ver as paradas, para [A DEFINIR: benefício]")
+
+
+def test_rewrite_as_sentence_drops_model_explanation():
+    text = ("Como Cliente, quero pagar a fatura, para reduzir o tempo. "
+            "A especificação do dispositivo (tablet) deve ser definida nos critérios.")
+    assert parsing.normalize_rewrite({"reescrita_sugerida": text}) == "Como Cliente, quero pagar a fatura, para reduzir o tempo."
+
+
+@pytest.mark.parametrize("value", [[], "", "texto livre fora do padrão", [{"perfil": "a", "funcionalidade": ""}]])
+def test_empty_or_invalid_rewrite_is_none(value):
+    assert parsing.normalize_rewrite({"reescrita_sugerida": value}) is None

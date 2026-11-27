@@ -1,5 +1,5 @@
 versao: 1.0
-uso: bloco compartilhado (GERACAO_US_QUS, ANALISE_IMPACTO)
+uso: bloco compartilhado (GERACAO_US_QUS, ANALISE_IMPACTO, AVALIACAO_QUS_CONJUNTO)
 ---
 Individuais (aplique a cada história ao escrevê-la):
 1. Bem formada: tem perfil, funcionalidade e o benefício.

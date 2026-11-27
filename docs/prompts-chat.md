@@ -1,6 +1,6 @@
 # Prompts do ReqScriba para uso em chat
 
-Versão dos prompts: **5.0** (`app/llm/prompts.py`; os prompts das seções 3 e 3.1 ficam em `app/llm/templates/`, cada um com a própria versão).
+Versão dos prompts: **5.0** (`app/llm/prompts.py`; os prompts das seções 3, 3.1 e 6 ficam em `app/llm/templates/`, cada um com a própria versão).
 
 Este arquivo reúne os prompts que o ReqScriba envia ao LLM, já montados em texto corrido, para você colar
 num chat (ChatGPT, Claude, Llama etc.) e testar fora do sistema.
@@ -586,50 +586,19 @@ Critérios de aceitação:
 
 ## 6. Avaliação QUS de conjunto e reescrita sugerida (AVALIACAO_QUS_CONJUNTO)
 
-Avalia a história em relação ao restante do backlog e, em seguida, sugere uma reescrita que resolva todos
-os problemas encontrados, inclusive os da avaliação individual (prompt 5).
+Template `app/llm/templates/avaliacao_qus_conjunto.md`. Avalia a história em relação ao restante do backlog e,
+em seguida, sugere uma reescrita que resolva todos os problemas encontrados, inclusive os da avaliação
+individual (prompt 5). A reescrita vem em campos (perfil, funcionalidade, benefício) e o sistema monta a frase
+"Como …, quero …, para …"; na divisão, monta "H1: Como …; H2: Como …". O sistema só envia os critérios de
+conjunto que não têm regra determinística (unique e uniform são calculados pelo código; conflict_free e
+independent só vão quando há outras histórias).
 
 ```text
-### TAREFA: AVALIACAO_QUS_CONJUNTO
-Faça as duas etapas abaixo, nesta ordem.
-
-## ETAPA 1: Avaliar o conjunto (campo "analise_transversal_conjunto")
-Avalie a HISTÓRIA ALVO em relação às demais histórias do backlog, apenas nos critérios abaixo.
-Responda para cada critério "resultado" ("Atende", "Atenção" ou "Não atende") e "observacao" (cite os códigos das histórias relacionadas quando houver conflito, dependência ou lacuna).
-
-Critérios:
-- conflict_free: Sem conflitos: não contradiz outra história do backlog. Se houver contradição, não atende: cite os códigos e descreva o conflito, sem escolher um lado.
-  Incorreto: H1 "Como usuário, posso excluir apenas os pontos de referência que eu adicionei" H2 "Como usuário, posso editar qualquer ponto de referência"
-  Correto: H1 "Como usuário, posso excluir apenas os pontos de referência que eu adicionei" H2 "Como usuário, posso editar os pontos de referência que adicionei."
-- unique: Única: não repete outra história do backlog, nem com outras palavras; se outra descreve a mesma necessidade, não atende (cite o código da outra).
-- uniform: Uniforme: a funcionalidade segue o mesmo estilo das demais (verbo no infinitivo, minúsculas) e o perfil é um papel, como nas demais histórias.
-- independent: Independente: pode ser implementada sem depender de outras histórias (cite os códigos das dependências, se houver).
-- complete: Completa: o fluxo essencial desta necessidade não está incompleto no backlog (ex.: há "editar o pedido" mas nada sobre criá-lo). Se estiver, descreva na observação qual história falta.
-  Incorreto: Ter uma história para editar um conteúdo, mas esquecer de criar uma história para adicionar esse conteúdo.
-  Correto: Ter o fluxo completo (ex: histórias para criar, visualizar e editar um registro)
-
-## ETAPA 2: Sugerir a melhoria (campo "reescrita_sugerida")
-Só depois de concluir a Etapa 1, reescreva a HISTÓRIA ALVO de modo a resolver TODOS os problemas: os da lista PROBLEMAS JÁ ENCONTRADOS e os que você apontou na Etapa 1 ("Atenção" ou "Não atende").
-- Use o formato "Como <perfil>, quero <funcionalidade>, para <benefício>".
-- Detalhes, telas, regras e ordem de implementação saem do texto da história.
-- Reescreva só a HISTÓRIA ALVO. Se for preciso dividi-la (atômica, estimável ou conceitualmente sólida), cada parte vem do conteúdo que já está nela: não acrescente funcionalidades novas. Escreva as partes em sequência, como "H1: Como ...; H2: Como ...".
-- Nunca repita nem reformule histórias de DEMAIS HISTÓRIAS DO BACKLOG.
-- Lacunas do critério complete (histórias que faltam no backlog) não se resolvem na reescrita: ficam só na observação da Etapa 1.
-- Não inclua códigos de história (ex.: US-001) no texto.
-- Se não houver nenhum problema a resolver, devolva "".
-
-PROBLEMAS JÁ ENCONTRADOS:
-- [atomic] Não atende: [[evidência da avaliação individual]] Ação: [[ação sugerida]]
-- [lacuna] [[elemento]]: [[descrição]]
-(ou "- (nenhum)")
-
-Formato (nesta ordem): {"analise_transversal_conjunto": {"<criterio>": {"resultado": "...", "observacao": "..."}},
-"reescrita_sugerida": "string"}
-
 HISTÓRIA ALVO:
 Código: [[US-001]]
 Título: [[título]]
 História: [[Como …, quero …, para …]]
+Campos: perfil = [[perfil]] | funcionalidade = [[funcionalidade]] | beneficio = [[benefício ou (ausente)]]
 Critérios de aceitação:
 - [[CA1]]: [[Dado …, quando …, então …]]
 
@@ -637,6 +606,118 @@ DEMAIS HISTÓRIAS DO BACKLOG:
 - [[US-002]]: [[Como …, quero …, para …]]
 - [[US-003]]: [[Como …, quero …, para …]]
 (ou "- (nenhuma outra história)")
+
+### TAREFA: AVALIACAO_QUS_CONJUNTO
+
+## PAPEL
+
+Você é um engenheiro de requisitos sênior, especializado em refinamento de Histórias de Usuário segundo o
+framework Quality User Story (QUS) de Lucassen et al. (2016).
+
+## OBJETIVO
+
+Faça as duas etapas abaixo, nesta ordem: avalie a HISTÓRIA ALVO em relação ao backlog e, depois, sugira uma
+reescrita dela que resolva todos os problemas encontrados.
+
+## ETAPA 1: Avaliar o conjunto (campo "analise_transversal_conjunto")
+
+Avalie a HISTÓRIA ALVO em relação às DEMAIS HISTÓRIAS DO BACKLOG, apenas nos critérios abaixo. Para cada
+critério, responda "resultado" ("Atende", "Atenção" ou "Não atende") e "observacao" (cite os códigos das
+histórias relacionadas quando houver conflito, dependência ou lacuna).
+
+Critérios:
+- conflict_free: Sem conflitos: não contradiz outra história do backlog. Se houver contradição, não atende: cite os
+  códigos e descreva o conflito, sem escolher um lado.
+  Incorreto: H1 "Como usuário, posso excluir apenas os pontos de referência que eu adicionei" H2 "Como usuário, posso editar qualquer ponto de referência"
+  Correto: H1 "Como usuário, posso excluir apenas os pontos de referência que eu adicionei" H2 "Como usuário, posso editar os pontos de referência que adicionei."
+- unique: Única: não repete outra história do backlog, nem com outras palavras; se outra descreve a mesma
+  necessidade, não atende (cite o código da outra).
+- uniform: Uniforme: a funcionalidade segue o mesmo estilo das demais (verbo no infinitivo, minúsculas) e o perfil
+  é um papel, como nas demais histórias.
+- independent: Independente: pode ser implementada sem depender de outras histórias (cite os códigos das
+  dependências, se houver).
+- complete: Completa: o fluxo essencial desta necessidade não está incompleto no backlog (ex.: há "editar o pedido"
+  mas nada sobre criá-lo). Se estiver, descreva na observação qual história falta.
+  Incorreto: Ter uma história para editar um conteúdo, mas esquecer de criar uma história para adicionar esse conteúdo.
+  Correto: Ter o fluxo completo (ex: histórias para criar, visualizar e editar um registro)
+
+## ETAPA 2: Sugerir a melhoria (campo "reescrita_sugerida")
+
+Só depois de concluir a Etapa 1, reescreva a HISTÓRIA ALVO de modo a resolver TODOS os problemas: os da lista
+PROBLEMAS JÁ ENCONTRADOS e os que você apontou na Etapa 1 ("Atenção" ou "Não atende").
+
+"reescrita_sugerida" é uma lista com as histórias resultantes: uma só, ou várias quando for preciso dividir a
+HISTÓRIA ALVO (atômica, estimável ou conceitualmente sólida). Cada item contém:
+- "perfil": o papel de usuário. Mantenha o perfil atual; só troque quando o próprio perfil for o problema
+  (ex.: nome de uma pessoa, erro de digitação), e nunca por um papel que não apareça na história. Se a
+  história não tiver perfil, use null.
+- "funcionalidade": o que o usuário quer fazer, começando por verbo no infinitivo e em minúsculas, sem
+  "quero". Uma única ação por item, sem detalhes, valores, telas, regras ou ordem de implementação.
+- "beneficio": por que ele quer isso, em minúsculas e sem "para" ou "para que eu possa". Mantenha o benefício
+  atual; ajuste só a redação quando ele for o problema (ex.: esconde outra funcionalidade). Se a história não
+  tiver benefício, use null: não invente um.
+
+Regras da reescrita:
+- Cada item vem do conteúdo que JÁ está na HISTÓRIA ALVO. Não acrescente funcionalidades, perfis, benefícios,
+  exemplos ou detalhes que ela não traz: ao dividir, separe as ações que ela já descreve.
+- Um termo vago sem definição na história continua na reescrita: a falta da definição é uma lacuna, não algo
+  a completar por suposição.
+- Detalhes, telas e regras saem do texto (vão para os critérios de aceitação); não escreva explicações,
+  observações nem justificativas nos campos.
+- Nunca repita nem reformule histórias de DEMAIS HISTÓRIAS DO BACKLOG.
+- Lacunas do critério complete (histórias que faltam no backlog) não se resolvem na reescrita: ficam só na
+  observação da Etapa 1.
+- Não inclua códigos de história (ex.: US-001) nem de requisito (ex.: RN1) nos campos.
+- O sistema monta a frase "Como [perfil], quero [funcionalidade], para [beneficio]." a partir dos campos:
+  não escreva a frase completa.
+- Se não houver nenhum problema a resolver, devolva "reescrita_sugerida": [].
+
+## CRITÉRIOS DE QUALIDADE (QUS) PARA A REESCRITA
+
+Individuais (aplique a cada história ao escrevê-la):
+1. Bem formada: tem perfil, funcionalidade e o benefício.
+2. Atômica: expressa exatamente requisito para uma única funcionalidade, sem agrupar recursos em um único texto.
+   Incorreto: "Como usuário, posso clicar em um local específico no mapa e, assim, realizar uma busca por pontos de interesse associados a essa combinação de latitude e longitude."
+   Correto: H1 "Como usuário, posso clicar em um local específico no mapa"; H2 "Como usuário, posso visualizar pontos de referência associados à combinação de latitude e longitude de um local específico."
+3. Mínima: contém apenas perfil, funcionalidade e benefício. Detalhes, observações, telas, regras e ordem de
+   implementação DEVEM ficar fora do texto da história (são tratados na etapa de critérios de aceitação).
+   Incorreto: "Como um profissional de saúde, quero visualizar as horas registradas esta semana (divididas por produtos e atividades). Veja: protótipo da Alice. OBS: primeiro crie a tela de visão geral e, depois, adicione as validações."
+   Correto: "Como um profissional de saúde, eu quero visualizar as horas registradas esta semana."
+4. Conceitualmente sólida: a funcionalidade é o meio e o benefício é o motivo; o benefício não pode
+   esconder outra funcionalidade.
+   Incorreto: H1 "Como usuário, quero abrir o mapa interativo para visualizar a localização de pontos de referência." - funcionalidade "abrir o mapa", benefício "ver a localização dos estabelecimentos"
+   Correto: H1 "Como usuário, quero abrir o mapa interativo"; H2 "Como usuário, quero ver a localização de pontos de referência no mapa interativo."
+5. Orientada ao problema: descreve a necessidade, não a solução técnica.
+   Incorreto: "Como profissional de assistência, quero salvar um reembolso — adicionar botão de salvar no canto superior direito (nunca desabilitado)."
+   Correto: "Como profissional de saúde, quero garantir o reembolso."
+6. Sem ambiguidade: evite termos vagos ("conteúdo", "dados", "gerenciar", "melhorar"). Se a fonte usar um
+   termo vago sem defini-lo, mantenha o termo e registre a falta da definição em "informacoes_ausentes".
+   Incorreto: "Como usuário, posso editar o conteúdo que adicionei à página de perfil de uma pessoa."
+   Correto (se a fonte disser): "Como usuário, posso editar conteúdo de vídeo, foto e áudio que adicionei à página de perfil de uma pessoa."
+7. Frase completa: a funcionalidade é uma ação clara, não um rótulo solto.
+   Incorreto: "configuração do servidor"
+   Correto: "Como administrador, quero configurar o arquivo sudoers do servidor"
+8. Estimável: não pode ser tão ampla que impeça estimar o esforço; divida histórias amplas.
+   Incorreto: H1 "Como profissional de assistência, quero visualizar minha lista de rotas para os próximos dias, para que eu possa me preparar (por exemplo, saber a que horas devo começar o deslocamento)."
+   Correto: H1 "Como profissional de assistência, quero visualizar minha lista de rotas para os próximos dias/dias futuros, para que eu possa me preparar"; H2 "Como gestor, quero carregar uma lista de rotas para profissionais de assistência."
+
+PROBLEMAS JÁ ENCONTRADOS:
+- [atomic] Não atende: [[evidência da avaliação individual]] Ação: [[ação sugerida]]
+- [lacuna] [[elemento]]: [[descrição]]
+(ou "- (nenhum)")
+
+## ANTES DE RESPONDER, CONFIRA
+
+- Todo problema da lista e da Etapa 1 foi resolvido, ou é uma lacuna que depende dos stakeholders.
+- Nenhum item tem funcionalidade, perfil ou benefício que não estava na HISTÓRIA ALVO.
+- Cada item tem uma única ação e nenhum texto além dos três campos.
+
+## FORMATO DA RESPOSTA
+
+{"analise_transversal_conjunto": {"complete": {"resultado": "Atende | Atenção | Não atende", "observacao": "string"}},
+ "reescrita_sugerida": [{"perfil": "string ou null", "funcionalidade": "string", "beneficio": "string ou null"}]}
+
+Em "analise_transversal_conjunto", inclua uma entrada para cada critério da Etapa 1. Retorne somente o JSON.
 ```
 
 ---

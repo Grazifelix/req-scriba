@@ -107,11 +107,26 @@ def test_rewrite_with_only_copies_is_discarded_and_clears_old_suggestion(contain
         assert StoryService(uow).detail(story_id)["sugestao_scriba"] is None  # a antiga não fica na tela
 
 
-def test_rewrite_with_punctuation_fix_is_kept(container, project_id):
+def test_rewrite_with_typo_fix_in_a_field_is_kept(container, project_id):
+    story_id = create(container, project_id, **{**FULL, "perfil": "coordenador pedagogico"})
+    rewrite_with(container, [{**FULL}])
+    assert evaluate(container, story_id)["reescrita_sugerida"] == TARGET_TEXT
+
+
+def test_rewrite_that_only_changes_punctuation_is_discarded(container, project_id):
+    """O código monta a frase no padrão: tirar a vírgula antes de "para" não muda a história."""
     story_id = create(container, project_id, **FULL)
-    fixed = TARGET_TEXT.replace("turma, para", "turma para")
-    rewrite_with(container, fixed)
-    assert evaluate(container, story_id)["reescrita_sugerida"] == fixed
+    rewrite_with(container, TARGET_TEXT.replace("turma, para", "turma para"))
+    assert evaluate(container, story_id)["reescrita_sugerida"] is None
+
+
+def test_rewrite_fields_are_assembled_without_model_explanations(container, project_id):
+    story_id = create(container, project_id, **FULL)
+    rewrite_with(container, [{"perfil": "coordenador pedagógico", "funcionalidade": "quero emitir o boletim em PDF",
+                              "beneficio": "para que eu possa acompanhar o desempenho dos alunos"}])
+    assert evaluate(container, story_id)["reescrita_sugerida"] == (
+        "Como coordenador pedagógico, quero emitir o boletim em PDF, para acompanhar o desempenho dos alunos.")
+    assert container.llm.schemas["AVALIACAO_QUS_CONJUNTO"]["title"] == "AVALIACAO_QUS_CONJUNTO"
 
 
 def test_rewrite_part_similar_to_target_is_kept(container, project_id):
@@ -119,7 +134,7 @@ def test_rewrite_part_similar_to_target_is_kept(container, project_id):
     create(container, project_id, **{**FULL, "funcionalidade": "emitir o boletim da turma em PDF"})  # vizinha
     reworded = "Como coordenador pedagógico, quero emitir o boletim da turma, para acompanhar o desempenho de cada aluno"
     rewrite_with(container, reworded)
-    assert evaluate(container, story_id)["reescrita_sugerida"] == reworded
+    assert evaluate(container, story_id)["reescrita_sugerida"] == reworded + "."
 
 
 def test_deterministic_rules_override_llm(container, project_id):

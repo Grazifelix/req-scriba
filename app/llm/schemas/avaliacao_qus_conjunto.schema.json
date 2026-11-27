@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "AVALIACAO_QUS_CONJUNTO",
+  "description": "Saída da avaliação QUS de conjunto e da reescrita sugerida (a frase da história é montada pelo código).",
+  "type": "object",
+  "required": ["analise_transversal_conjunto", "reescrita_sugerida"],
+  "properties": {
+    "analise_transversal_conjunto": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "required": ["resultado", "observacao"],
+        "properties": {
+          "resultado": {"type": "string", "enum": ["Atende", "Atenção", "Não atende"]},
+          "observacao": {"type": "string"}
+        }
+      }
+    },
+    "reescrita_sugerida": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["perfil", "funcionalidade", "beneficio"],
+        "properties": {
+          "perfil": {"type": ["string", "null"]},
+          "funcionalidade": {"type": "string"},
+          "beneficio": {"type": ["string", "null"]}
+        }
+      }
+    }
+  }
+}

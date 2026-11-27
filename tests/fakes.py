@@ -100,7 +100,8 @@ def default_individual(prompt: str) -> dict[str, Any]:
 def default_set(prompt: str) -> dict[str, Any]:
     keys = re.findall(r"^- (conflict_free|independent|complete):", prompt, flags=re.M)
     return {"analise_transversal_conjunto": {k: {"resultado": "Atende", "observacao": "ok"} for k in keys},
-            "reescrita_sugerida": "Como coordenador pedagógico, quero emitir o boletim em PDF, para acompanhar o desempenho."}
+            "reescrita_sugerida": [{"perfil": "coordenador pedagógico", "funcionalidade": "emitir o boletim em PDF",
+                                    "beneficio": "acompanhar o desempenho"}]}
 
 
 def default_questions(prompt: str) -> dict[str, Any]:

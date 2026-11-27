@@ -158,7 +158,7 @@ class QualityService:
             }
             gaps = list(story["informacoes_ausentes"]) + individual["lacunas"]
             prompt = prompts.set_evaluation_prompt(story, context, llm_keys, problems, gaps)
-            raw = llm.generate_json(prompts.SYSTEM, prompt)
+            raw = llm.generate_json(prompts.SYSTEM, prompt, prompts.SET_EVALUATION_SCHEMA)
             set_result.update(parsing.normalize_set_analysis(raw, llm_keys))
             rewrite = _drop_backlog_copies(parsing.normalize_rewrite(raw), story, others)
         set_result = {k: set_result[k] for k in qus.SET_CRITERIA}

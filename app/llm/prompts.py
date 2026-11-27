@@ -111,7 +111,7 @@ def _block(name: str) -> str:
     return load_template(name)[1].template
 
 
-# Critérios QUS em texto, compartilhados pelos prompts que escrevem histórias (geração e impacto de novas fontes).
+# Critérios QUS em texto, compartilhados pelos prompts que escrevem histórias (geração, impacto e reescrita).
 QUS_INDIVIDUAL = _block("_qus_individual")
 QUS_SET = _block("_qus_conjunto")
 
@@ -120,6 +120,7 @@ STORY_GENERATION = "geracao_us_qus"
 CRITERIA_GENERATION = "geracao_criterios_aceitacao"
 EVIDENCE_AUDIT = "validacao_evidencias"
 IMPACT_SOURCES = "analise_impacto_fontes"
+SET_EVALUATION = "avaliacao_qus_conjunto"
 
 
 SCHEMAS_DIR = Path(__file__).with_name("schemas")
@@ -134,12 +135,14 @@ STORY_SCHEMA = load_schema(STORY_GENERATION)
 CRITERIA_SCHEMA = load_schema(CRITERIA_GENERATION)
 AUDIT_SCHEMA = load_schema(EVIDENCE_AUDIT)
 IMPACT_SCHEMA = load_schema(IMPACT_SOURCES)
+SET_EVALUATION_SCHEMA = load_schema(SET_EVALUATION)
 
 
 def prompt_versions() -> dict[str, str]:
     """Versões dos prompts em arquivo, registradas no resultado dos jobs (comparação entre execuções)."""
     names = {"GERACAO_US_QUS": STORY_GENERATION, "GERACAO_CRITERIOS_ACEITACAO": CRITERIA_GENERATION,
              "VALIDACAO_EVIDENCIAS": EVIDENCE_AUDIT, "ANALISE_IMPACTO_FONTES": IMPACT_SOURCES,
+             "AVALIACAO_QUS_CONJUNTO": SET_EVALUATION,
              "QUS_INDIVIDUAL": "_qus_individual", "QUS_CONJUNTO": "_qus_conjunto"}
     return {"geral": PROMPT_VERSION, **{task: template_version(name) for task, name in names.items()}}
 
@@ -412,6 +415,13 @@ def _problems_block(problems: dict[str, dict[str, Any]], gaps: list[dict[str, An
     return "\n".join(lines) or "- (nenhum)"
 
 
+def _target_story_block(story: dict[str, Any]) -> str:
+    """HISTÓRIA ALVO da avaliação de conjunto: texto, campos (a reescrita parte deles) e critérios."""
+    fields = (f"Campos: perfil = {story.get('perfil') or '(ausente)'} | funcionalidade = "
+              f"{story.get('funcionalidade') or '(ausente)'} | beneficio = {story.get('beneficio') or '(ausente)'}")
+    return _story_block(story).replace("\nCritérios de aceitação:", f"\n{fields}\nCritérios de aceitação:", 1)
+
+
 def set_evaluation_prompt(
     story: dict[str, Any],
     backlog: list[dict[str, Any]],
@@ -420,45 +430,14 @@ def set_evaluation_prompt(
     gaps: list[dict[str, Any]] | None = None,
 ) -> str:
     """Última chamada da avaliação: critérios de conjunto e, ao final, a reescrita que resolve tudo."""
-    criteria = "\n".join(f"- {k}: {EVAL_SET_CRITERIA[k]}" for k in keys)
     others = "\n".join(f"- {s['codigo']}: {s['historia']}" for s in backlog) or "- (nenhuma outra história)"
-    return f"""### TAREFA: AVALIACAO_QUS_CONJUNTO
-Faça as duas etapas abaixo, nesta ordem.
-
-## ETAPA 1: Avaliar o conjunto (campo "analise_transversal_conjunto")
-Avalie a HISTÓRIA ALVO em relação às demais histórias do backlog, apenas nos critérios abaixo.
-Responda para cada critério "resultado" ("Atende", "Atenção" ou "Não atende") e "observacao"
-(cite os códigos das histórias relacionadas quando houver conflito, dependência ou lacuna).
-
-Critérios:
-{criteria}
-
-## ETAPA 2: Sugerir a melhoria (campo "reescrita_sugerida")
-Só depois de concluir a Etapa 1, reescreva a HISTÓRIA ALVO de modo a resolver TODOS os problemas: os da
-lista PROBLEMAS JÁ ENCONTRADOS e os que você apontou na Etapa 1 ("Atenção" ou "Não atende").
-- Use o formato "Como <perfil>, quero <funcionalidade>, para <benefício>".
-- Detalhes, telas, regras e ordem de implementação saem do texto da história.
-- Reescreva só a HISTÓRIA ALVO. Se for preciso dividi-la (atômica, estimável ou conceitualmente sólida),
-  cada parte vem do conteúdo que já está nela: não acrescente funcionalidades novas. Escreva as partes em
-  sequência, como "H1: Como ...; H2: Como ...".
-- Nunca repita nem reformule histórias de DEMAIS HISTÓRIAS DO BACKLOG.
-- Lacunas do critério complete (histórias que faltam no backlog) não se resolvem na reescrita: ficam só na
-  observação da Etapa 1.
-- Não inclua códigos de história (ex.: US-001) no texto.
-- Se não houver nenhum problema a resolver, devolva "".
-
-PROBLEMAS JÁ ENCONTRADOS:
-{_problems_block(problems or {}, gaps or [])}
-
-Formato (nesta ordem): {{"analise_transversal_conjunto": {{"<criterio>": {{"resultado": "...", "observacao": "..."}}}},
-"reescrita_sugerida": "string"}}
-
-HISTÓRIA ALVO:
-{_story_block(story)}
-
-DEMAIS HISTÓRIAS DO BACKLOG:
-{others}
-"""
+    return load_template(SET_EVALUATION)[1].substitute(
+        historia=_target_story_block(story),
+        backlog=others,
+        criterios="\n".join(f"- {k}: {EVAL_SET_CRITERIA[k]}" for k in keys),
+        problemas=_problems_block(problems or {}, gaps or []),
+        qus_individual=QUS_INDIVIDUAL,
+    )
 
 
 def questions_prompt(story: dict[str, Any], defects: list[dict[str, Any]], evidence_blocks: list[dict[str, Any]]) -> str:
