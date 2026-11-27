@@ -25,6 +25,12 @@ class AcceptanceCriterionOut(OutputModel):
     criterio_id: Optional[int] = Field(default=None, description="Id permanente do critério")
     versao_historia: Optional[int] = Field(default=None, description="Versão da história em que o critério entrou")
     status: Optional[str] = Field(default=None, description="vigente | substituido")
+    situacao: Optional[str] = Field(
+        default=None, description="valido | desatualizado (a história mudou depois do critério; confirme ou regenere)"
+    )
+    validado_na_versao: Optional[int] = None
+    desatualizado_na_versao: Optional[int] = None
+    motivo_situacao: Optional[str] = None
     titulo: str
     criterio: str = Field(description="Texto completo 'Dado …, quando …, então …'")
     dado: Optional[str] = Field(default=None, description="Presente nos critérios gerados pela IA")
@@ -71,13 +77,23 @@ class GenerationRequest(InputModel):
     )
 
 
+class CriteriaRegenerationRequest(InputModel):
+    escopo: Literal["auto", "desatualizados", "todos"] = Field(
+        default="auto", description="auto: os desatualizados, ou todos se não houver nenhum"
+    )
+    criterio_ids: list[int] = Field(
+        default_factory=list, max_length=50, description="Regera só estes critérios (os demais são mantidos)"
+    )
+
+
 class CriteriaGenerationRequest(InputModel):
     historia_ids: list[int] = Field(
         default_factory=list, max_length=500,
         description="Histórias a processar; vazio = todas as ativas não aprovadas do projeto.",
     )
     substituir: bool = Field(
-        default=False, description="Também regera histórias que já têm critérios (a versão anterior é preservada)."
+        default=False, description="Também regera histórias com critérios válidos (sem isso, entram só as sem "
+                                   "critérios e as com critérios desatualizados). A versão anterior é preservada."
     )
 
 

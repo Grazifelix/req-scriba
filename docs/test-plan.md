@@ -78,7 +78,9 @@ Comando: `make test` (equivale a `pytest -q`). Os testes de API e de Chroma usam
 
 19. Versões registram as fontes que motivaram a mudança e o status; a comparação mostra campos, critérios e evidências; proposta cancelada ou decidida não pode ser decidida de novo; proposta desatualizada só é aplicada com confirmação, preservando edições posteriores; nova necessidade é checada contra o backlog atual antes do código definitivo.
 
-Cobertura: `tests/test_versioning_approval.py` (Milestone 4), `tests/test_services_updates.py` e `tests/test_domain_impact.py` (Milestone 3), `tests/test_traceability.py` (Milestone 2), `tests/test_db_migration.py` (tabela de critérios), `tests/test_services_criteria.py` (pipeline, critérios, execução independente, API), `tests/test_llm_parsing.py`
+20. Mudança de perfil, funcionalidade ou benefício desatualiza os critérios anteriores (com o motivo e a indicação da IA), sem apagá-los; lista revisada junto e critérios novos ficam válidos; mudança só de critérios não desatualiza; confirmar valida na versão atual; a regeneração troca só os desatualizados ou os escolhidos, mantém os válidos e preserva os substituídos; em HU aprovada vira proposta aplicada pela aprovação.
+
+Cobertura: `tests/test_criteria_versions.py` (Milestone 5), `tests/test_versioning_approval.py` (Milestone 4), `tests/test_services_updates.py` e `tests/test_domain_impact.py` (Milestone 3), `tests/test_traceability.py` (Milestone 2), `tests/test_db_migration.py` (tabela de critérios), `tests/test_services_criteria.py` (pipeline, critérios, execução independente, API), `tests/test_llm_parsing.py`
 (fontes por afirmação, Dado/Quando/Então), `tests/test_llm_prompts.py` (templates versionados e contrato
 exemplo × schema) e `tests/test_integrations.py` (saída estruturada nos dois adaptadores).
 

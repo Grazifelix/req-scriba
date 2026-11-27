@@ -53,6 +53,7 @@ class SuggestionType(LabeledEnum):
     MODIFICATION = "modificacao"
     CONTRADICTION = "contradicao"
     NEW_NEED = "nova_necessidade"
+    CRITERIA_REVIEW = "revisao_criterios"
 
 
 class JobStatus(LabeledEnum):
@@ -131,6 +132,7 @@ LABELS: dict[Enum, str] = {
     SuggestionType.MODIFICATION: "Modificação: alteração proposta na história",
     SuggestionType.CONTRADICTION: "Contradição: fontes incompatíveis",
     SuggestionType.NEW_NEED: "Nova necessidade: história candidata",
+    SuggestionType.CRITERIA_REVIEW: "Revisão de critérios: novos critérios propostos pela IA",
     JobStatus.PENDING: "Na fila",
     JobStatus.PROCESSING: "Em processamento",
     JobStatus.COMPLETED: "Concluído",

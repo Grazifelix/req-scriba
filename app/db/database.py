@@ -21,10 +21,16 @@ NEW_COLUMNS = (
     ("versoes_historia", "fontes", "TEXT NOT NULL DEFAULT '[]'"),
     ("versoes_historia", "status_historia", "TEXT"),
     ("sugestoes_atualizacao", "motivo_decisao", "TEXT"),
+    ("criterios_aceitacao", "situacao", "TEXT NOT NULL DEFAULT 'valido'"),
+    ("criterios_aceitacao", "validado_na_versao", "INTEGER"),
+    ("criterios_aceitacao", "desatualizado_na_versao", "INTEGER"),
+    ("criterios_aceitacao", "motivo_situacao", "TEXT"),
 )
-OLD_SUGGESTION_TYPES = "'complementa', 'contradiz', 'novo_requisito')"
+# CHECK de sugestoes_atualizacao.tipo: bancos anteriores ao Milestone 3 terminam em 'novo_requisito'), os do
+# Milestone 3 em 'nova_necessidade'); ambos passam à lista atual.
+OLD_SUGGESTION_TYPES = ("'complementa', 'contradiz', 'novo_requisito')", "'contradicao', 'nova_necessidade')")
 NEW_SUGGESTION_TYPES = ("'complementa', 'contradiz', 'novo_requisito', 'confirmacao', 'complementacao', 'modificacao', "
-                        "'contradicao', 'nova_necessidade')")
+                        "'contradicao', 'nova_necessidade', 'revisao_criterios')")
 CRITERIA_MIGRATION = "criterios_tabela_v1"
 CRITERION_EXTRAS = ("dado", "quando", "entao")
 
@@ -32,12 +38,15 @@ CRITERION_EXTRAS = ("dado", "quando", "entao")
 def _migrate(conn: sqlite3.Connection) -> None:
     """Ajustes de bancos criados por versões anteriores do schema (idempotente)."""
     _migrate_item_types(conn)
-    _recreate_with_new_check(conn, "sugestoes_atualizacao", OLD_SUGGESTION_TYPES, NEW_SUGGESTION_TYPES,
-                             "CREATE INDEX IF NOT EXISTS ix_sugestoes_projeto ON sugestoes_atualizacao(projeto_id, status)")
+    for old in OLD_SUGGESTION_TYPES:
+        _recreate_with_new_check(conn, "sugestoes_atualizacao", old, NEW_SUGGESTION_TYPES,
+                                 "CREATE INDEX IF NOT EXISTS ix_sugestoes_projeto ON sugestoes_atualizacao(projeto_id, status)")
     for table, column, ddl in NEW_COLUMNS:
         columns = {r[1] for r in conn.execute(f"PRAGMA table_info({table})")}
         if column not in columns:
             conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {ddl}")
+    # critérios existentes valem para a versão em que entraram
+    conn.execute("UPDATE criterios_aceitacao SET validado_na_versao = versao_historia WHERE validado_na_versao IS NULL")
     conn.commit()
     _migrate_criteria(conn)
 

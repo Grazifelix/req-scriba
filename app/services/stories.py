@@ -17,7 +17,7 @@ from app.services import presenters
 from app.services.common import require_project, require_story
 from app.services.evidence import NO_SOURCE_CLAIM, add_evidences
 from app.services.retrieval import describe_chunk
-from app.services.criteria_store import sync_criteria
+from app.services.criteria_store import current_ids, mark_outdated, sync_criteria
 from app.services.versioning import create_version, same_content, snapshot
 
 TEMPLATE_ELEMENTS = set(story_format.ELEMENTS)
@@ -112,11 +112,23 @@ def create_story_record(
     return story_id
 
 
-def apply_content_change(uow: UnitOfWork, story: dict, changes: dict) -> dict | None:
+COMPONENT_NAMES = {"perfil": "perfil", "funcionalidade": "funcionalidade", "beneficio": "benefício"}
+
+
+def changed_components(story: dict, content: dict) -> list[str]:
+    """Componentes da frase (perfil, funcionalidade, benefício) que mudam, pelo texto normalizado."""
+    return [c for c in story_format.ELEMENTS if normalize(story.get(c)) != normalize(content.get(c))]
+
+
+def apply_content_change(uow: UnitOfWork, story: dict, changes: dict, *, criteria_validated: bool = False,
+                         criteria_hints: dict[int, str] | None = None) -> dict | None:
     """Aplica mudanças de conteúdo. Retorna o novo conteúdo ou None se nada mudou.
 
     Critérios alterados são reconciliados na tabela de critérios como pertencentes à próxima versão, que o
-    chamador cria logo em seguida (``create_version``)."""
+    chamador cria logo em seguida (``create_version``). Se perfil, funcionalidade ou benefício mudam, os
+    critérios que já existiam ficam ``desatualizado`` (não valem automaticamente para a nova versão), exceto
+    quando o analista enviou a lista de critérios junto (``criteria_validated``). ``criteria_hints``: indicação
+    da IA por critério numa proposta de modificação (REVISAR/MANTER), registrada no motivo."""
     merged = {**snapshot(story), **changes}
     content = build_content(merged)
     if same_content(content, story):
@@ -129,8 +141,17 @@ def apply_content_change(uow: UnitOfWork, story: dict, changes: dict) -> dict | 
         **fields, "informacoes_ausentes": missing, "status": status_for(missing, story["status"]),
         "atualizado_em": utc_now_iso(),
     })
+    version = story["versao_atual"] + 1
+    before = {c["criterio_id"] for c in story.get("criterios_aceitacao") or [] if c.get("criterio_id")}
     if criteria_content(content["criterios_aceitacao"]) != snapshot(story)["criterios_aceitacao"]:
-        sync_criteria(uow, story["id"], content["criterios_aceitacao"], story["versao_atual"] + 1)
+        sync_criteria(uow, story["id"], content["criterios_aceitacao"], version)
+    components = changed_components(story, content)
+    if components and before:
+        names = ", ".join(COMPONENT_NAMES[c] for c in components)
+        validated = set(current_ids(uow, story["id"])) if criteria_validated else set()
+        mark_outdated(uow, story["id"], version,
+                      f"A história mudou ({names}) na v{version}: o critério não vale automaticamente para a nova versão.",
+                      criteria_hints, validated, before)
     return content
 
 
@@ -199,7 +220,8 @@ class StoryService:
         text = changes.pop("historia", None)
         if text is not None:
             changes = {**_parse_or_fail(text), **changes}  # campos explícitos têm precedência sobre o texto
-        if apply_content_change(self.uow, story, changes):
+        validated = changes.get("criterios_aceitacao") is not None  # o analista revisou a lista junto
+        if apply_content_change(self.uow, story, changes, criteria_validated=validated):
             create_version(self.uow, story_id, ChangeType.MANUAL, ChangeOrigin.MANUAL_EDIT, author)
         return self.detail(story_id)
 

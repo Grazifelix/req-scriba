@@ -12,8 +12,10 @@ from typing import Any
 # Campos de rastreabilidade dos critérios gerados pela IA, preservados quando presentes.
 CRITERION_EXTRA_FIELDS = ("dado", "quando", "entao", "fontes", "informacoes_ausentes", "afirmacoes_sem_evidencia", "origem")
 # Metadados do armazenamento: aparecem na API, mas não contam como conteúdo da história.
-CRITERION_META_FIELDS = ("criterio_id", "versao_historia", "status")
+CRITERION_META_FIELDS = ("criterio_id", "versao_historia", "status", "situacao", "validado_na_versao",
+                         "desatualizado_na_versao", "motivo_situacao")
 CURRENT, REPLACED = "vigente", "substituido"
+VALID, OUTDATED = "valido", "desatualizado"
 ORIGINS = ("ia", "manual", "legado")
 
 

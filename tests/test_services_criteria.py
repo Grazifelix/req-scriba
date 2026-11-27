@@ -204,7 +204,7 @@ def test_pipeline_records_stages_durations_and_prompt_versions(container, projec
     assert [s["etapa"] for s in result["etapas"]] == STAGES
     assert all(s["status"] == "concluida" and s["duracao_s"] >= 0 for s in result["etapas"])
     assert result["versoes_prompt"]["GERACAO_US_QUS"] == "1.0"
-    assert result["versoes_prompt"]["GERACAO_CRITERIOS_ACEITACAO"] == "1.0"
+    assert result["versoes_prompt"]["GERACAO_CRITERIOS_ACEITACAO"] == "1.1"
     criteria_stage = next(s for s in result["etapas"] if s["etapa"] == "geracao_criterios")
     assert criteria_stage["historias"] == 2 and criteria_stage["falhas"] == 0
     assert len(container.llm.prompts_for("GERACAO_CRITERIOS_ACEITACAO")) == 1  # as 2 histórias numa chamada
@@ -272,13 +272,16 @@ def test_generate_criteria_for_stored_story_creates_version(container, stored_st
     assert v2["responsavel"] == "ana"
 
 
-def test_generate_criteria_refuses_approved_story(container, stored_story):
+def test_generate_criteria_for_approved_story_becomes_proposal(container, stored_story):
+    """O LLM não escreve em história aprovada: os critérios gerados viram uma proposta pendente."""
     with container.uow() as uow:
         StoryService(uow).set_status(stored_story, StoryStatus.APPROVED)
+        result = CriteriaService(uow, container).generate(stored_story, "ana")
+    assert result["criterios_aceitacao"] == [] and result["versao_atual"] == 1  # história intacta
+    assert result["proposta_criterios_id"] and result["atualizacoes_pendentes"] == 1
     with container.uow() as uow, pytest.raises(ConflictError) as exc:
-        CriteriaService(uow, container).generate(stored_story, "ana")
-    assert exc.value.details["motivo"] == "historia_aprovada"
-    assert not container.llm.prompts_for("GERACAO_CRITERIOS_ACEITACAO")
+        CriteriaService(uow, container).generate(stored_story, "ana")  # já há uma pendente
+    assert exc.value.details["motivo"] == "proposta_pendente"
 
 
 def test_generate_criteria_llm_failure_changes_nothing(container, stored_story):
@@ -305,8 +308,9 @@ def test_batch_job_skips_approved_and_existing_unless_replace(container, project
     job = run(False)
     assert job["status"] == "concluido" and job["resultado"]["total"] == 0
     reasons = {i["historia_id"]: i["motivo"] for i in job["resultado"]["ignoradas"]}
-    assert reasons == {created[0]: "ja_possui_criterios", created[1]: "historia_aprovada"}
-    assert not container.llm.prompts_for("GERACAO_CRITERIOS_ACEITACAO")
+    assert reasons == {created[0]: "criterios_validos"}
+    assert len(job["resultado"]["propostas_criadas"]) == 1  # aprovada e sem critérios: vira proposta
+    container.llm.calls.clear()
 
     container.llm.handlers["GERACAO_CRITERIOS_ACEITACAO"] = lambda p: {"historias": [{"id": h, "criterios_aceitacao": [
         {"dado": "um bimestre encerrado", "quando": "o coordenador emitir", "entao": "o boletim fica disponível",
@@ -314,6 +318,7 @@ def test_batch_job_skips_approved_and_existing_unless_replace(container, project
         for h in re.findall(r"^\[(H\d+)\]", p, flags=re.M)]}
     job = run(True)
     assert job["resultado"]["historias_atualizadas"] == [created[0]]
+    assert {i["motivo"] for i in job["resultado"]["ignoradas"]} == {"proposta_pendente"}
     story = detail(container, created[0])
     assert story["criterios_aceitacao"][0]["entao"] == "o boletim fica disponível"
     assert story["versao_atual"] == 2 and story["versoes"][0]["conteudo"]["criterios_aceitacao"]
@@ -329,8 +334,8 @@ def test_criteria_api_routes(container, stored_story, project_id):
         assert job.status_code == 202 and job.json()["tipo"] == "geracao_criterios"
         assert client.get(f"/api/v1/jobs/{job.json()['id']}").json()["status"] == "concluido"
         client.post(f"/api/v1/historias/{stored_story}/aprovar")
-        conflict = client.post(f"/api/v1/historias/{stored_story}/criterios/gerar")
-        assert conflict.status_code == 409 and conflict.json()["erro"]["detalhes"]["motivo"] == "historia_aprovada"
+        proposal = client.post(f"/api/v1/historias/{stored_story}/criterios/gerar")
+        assert proposal.status_code == 200 and proposal.json()["proposta_criterios_id"]
         assert client.post("/api/v1/historias/999/criterios/gerar").status_code == 404
 
 

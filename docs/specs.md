@@ -352,6 +352,10 @@ frontend usa esses campos para mostrar em quais fontes a IA se baseou.
   `motivo_decisao`; `desatualizada` no detalhe quando a HU mudou depois da proposta; aprovação de proposta
   desatualizada ou de nova necessidade duplicada exige confirmação (`409` até lá). Desaprovar uma HU cancela as
   propostas pendentes dela. Decisão: D46.
+- **Critérios e versões (Milestone 5):** cada critério traz `versao_historia`, `situacao` (`valido | desatualizado`),
+  `validado_na_versao`, `desatualizado_na_versao` e `motivo_situacao`. Mudança de perfil, funcionalidade ou benefício
+  desatualiza os critérios anteriores; confirmar ou regerar resolve. Regeneração por `escopo` ou `criterio_ids`,
+  mantendo os válidos; em HU aprovada, gera proposta `revisao_criterios`. Decisão: D47.
 - **Critérios sob demanda:** `POST /historias/{id}/criterios/gerar` (síncrono) e
   `POST /projetos/{id}/criterios/gerar` (job `geracao_criterios`; ignora HU aprovadas, desaprovadas e, sem
   `substituir`, as que já têm critérios). Os critérios novos substituem os atuais numa nova versão (origem

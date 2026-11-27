@@ -232,14 +232,18 @@ def story_generation_prompt(
     )
 
 
-def criteria_story_block(label: str, story: dict[str, Any], evidence_labels: list[str]) -> str:
-    """História enviada ao prompt de critérios: texto, campos e rótulos das evidências vinculadas."""
-    return (
+def criteria_story_block(label: str, story: dict[str, Any], evidence_labels: list[str],
+                         kept: list[str] | None = None) -> str:
+    """História enviada ao prompt de critérios: texto, campos, rótulos das evidências e, numa regeneração parcial,
+    os critérios que continuam valendo (``kept``), para o modelo não repeti-los."""
+    validated = "".join(f"\n- {text}" for text in kept or [])
+    block = (
         f"[{label}] {story.get('historia')}\n"
         f"Perfil: {story.get('perfil') or '(ausente)'} | Funcionalidade: {story.get('funcionalidade')} | "
         f"Benefício: {story.get('beneficio') or '(ausente)'}\n"
         f"Evidências vinculadas: {', '.join(evidence_labels) or '(nenhuma)'}"
     )
+    return block + (f"\nCritérios já validados (continuam valendo; não repita nem reescreva):{validated}" if kept else "")
 
 
 def criteria_prompt(stories: list[str], blocks: list[dict[str, Any]], analysis_text: str | None = None) -> str:

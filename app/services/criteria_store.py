@@ -16,7 +16,7 @@ from typing import Any
 
 from app.core.time import utc_now_iso
 from app.db.unit_of_work import UnitOfWork
-from app.domain.criteria import CURRENT, REPLACED
+from app.domain.criteria import CURRENT, OUTDATED, REPLACED, VALID
 from app.domain.text import normalize
 
 UPDATABLE = ("titulo", "dado", "quando", "entao", "fontes", "informacoes_ausentes", "afirmacoes_sem_evidencia", "origem")
@@ -56,11 +56,42 @@ def sync_criteria(uow: UnitOfWork, story_id: int, criteria: list[dict[str, Any]]
         else:
             kept.append(uow.criteria.insert({
                 "historia_id": story_id, **values, "versao_historia": version, "status": CURRENT,
-                "criado_em": now, "atualizado_em": now,
+                "situacao": VALID, "validado_na_versao": version, "criado_em": now, "atualizado_em": now,
             }))
     for row in current.values():
         uow.criteria.update(row["id"], {"status": REPLACED, "substituido_na_versao": version, "atualizado_em": now})
     return kept
+
+
+def mark_outdated(uow: UnitOfWork, story_id: int, version: int, reason: str,
+                  hints: dict[int, str] | None = None, keep_valid: set[int] | None = None,
+                  only: set[int] | None = None) -> list[int]:
+    """A HU mudou na ``version``: critérios vigentes deixam de valer automaticamente (ficam ``desatualizado``).
+
+    ``hints``: indicação da IA por critério (ex.: "REVISAR", "MANTER"), anexada ao motivo; ``keep_valid``: ids
+    que o analista enviou junto com a mudança (continuam válidos nesta versão); ``only``: limita aos critérios
+    que já existiam antes da mudança (os escritos para ela nascem válidos). Retorna os ids marcados."""
+    now, marked = utc_now_iso(), []
+    hints, keep_valid = hints or {}, keep_valid or set()
+    for row in uow.criteria.list_current(story_id):
+        if only is not None and row["id"] not in only:
+            continue
+        if row["id"] in keep_valid:
+            uow.criteria.update(row["id"], {"situacao": VALID, "validado_na_versao": version,
+                                            "motivo_situacao": None, "atualizado_em": now})
+            continue
+        hint = hints.get(row["id"])
+        note = f" A IA indicou {hint.lower()}; confirme." if hint else ""
+        uow.criteria.update(row["id"], {"situacao": OUTDATED, "desatualizado_na_versao": version,
+                                        "motivo_situacao": reason + note, "atualizado_em": now})
+        marked.append(row["id"])
+    return marked
+
+
+def confirm_valid(uow: UnitOfWork, criterion_id: int, version: int) -> None:
+    """O analista confirma que o critério continua válido para a versão atual da HU."""
+    uow.criteria.update(criterion_id, {"situacao": VALID, "validado_na_versao": version, "desatualizado_na_versao": None,
+                                       "motivo_situacao": None, "atualizado_em": utc_now_iso()})
 
 
 def current_ids(uow: UnitOfWork, story_id: int) -> list[int]:

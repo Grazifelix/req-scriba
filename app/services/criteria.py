@@ -20,10 +20,11 @@ from dataclasses import dataclass, field
 from typing import Any, Callable
 
 from app.core.container import Container
-from app.core.errors import AppError, ConflictError, ExternalServiceError
+from app.core.errors import AppError, BusinessValidationError, ConflictError, ExternalServiceError, NotFoundError
 from app.core.time import utc_now_iso
 from app.db.unit_of_work import UnitOfWork
-from app.domain.enums import ChangeOrigin, ChangeType, JobStatus, JobType, StoryStatus
+from app.domain.criteria import OUTDATED, criteria_content
+from app.domain.enums import ChangeOrigin, ChangeType, JobStatus, JobType, StoryStatus, SuggestionStatus, SuggestionType
 from app.domain.text import similarity
 from app.domain.traceability import (
     CRITERIA_ELEMENT, CRITERION_WITHOUT_EVIDENCE, INVALID_REFERENCE, without_criteria_gaps,
@@ -36,8 +37,9 @@ from app.services.common import require_project, require_story
 from app.services.evidence import add_evidences, evidence_spec
 from app.services.jobs import JobService
 from app.services.retrieval import describe_chunk, related_chunks
+from app.services.criteria_store import confirm_valid
 from app.services.stories import apply_content_change
-from app.services.versioning import create_version
+from app.services.versioning import create_version, snapshot
 
 logger = logging.getLogger(__name__)
 
@@ -56,6 +58,8 @@ class CriteriaTarget:
     story: dict[str, Any]
     evidences: list[dict[str, Any]]
     related: list[dict[str, Any]] = field(default_factory=list)
+    # regeneração parcial: critérios vigentes que continuam valendo (vão ao prompt como "já validados")
+    kept: list[dict[str, Any]] = field(default_factory=list)
 
 
 @dataclass
@@ -166,7 +170,8 @@ def generate_criteria(
     failures: list[dict[str, Any]] = []
     for batch in _batches(targets, container.settings.generation_batch_chars):
         blocks, mapping, story_labels = _label_batch(batch)
-        stories = [prompts.criteria_story_block(t.ref, t.story, story_labels[t.ref]) for t in batch]
+        stories = [prompts.criteria_story_block(t.ref, t.story, story_labels[t.ref], [c["criterio"] for c in t.kept])
+                   for t in batch]
         try:
             data = container.llm.generate_json(
                 prompts.SYSTEM, prompts.criteria_prompt(stories, blocks, analysis), schema=prompts.CRITERIA_SCHEMA,
@@ -205,12 +210,13 @@ def apply_to_candidate(candidate: dict, outcome: CriteriaOutcome | None) -> None
     candidate["informacoes_ausentes"] = gaps + outcome.gaps
 
 
-def _apply_to_story(uow: UnitOfWork, story_id: int, outcome: CriteriaOutcome, author: str) -> int | None:
-    """História gravada: novas evidências → critérios → lacunas → nova versão (origem geracao_criterios_ia).
-    Retorna o número da versão criada, ou None se nada mudou."""
+def _apply_to_story(uow: UnitOfWork, story_id: int, outcome: CriteriaOutcome, author: str,
+                    kept: list[dict] | None = None) -> int | None:
+    """História gravada: novas evidências → critérios (mantidos + novos) → lacunas → nova versão (origem
+    geracao_criterios_ia). Os critérios substituídos ficam preservados. Retorna a versão criada ou None."""
     story = uow.stories.get(story_id)
     added = add_evidences(uow, story_id, outcome.new_evidences, "extracao")
-    changed = apply_content_change(uow, story, {"criterios_aceitacao": outcome.criteria})
+    changed = apply_content_change(uow, story, {"criterios_aceitacao": (kept or []) + outcome.criteria})
     current = uow.stories.get(story_id)
     gaps = without_criteria_gaps(current["informacoes_ausentes"]) + outcome.gaps
     if gaps != current["informacoes_ausentes"]:
@@ -221,18 +227,70 @@ def _apply_to_story(uow: UnitOfWork, story_id: int, outcome: CriteriaOutcome, au
                           note="Critérios de aceitação gerados pela IA a partir das evidências da história.")
 
 
-def _require_not_approved(story: dict) -> None:
-    if story["status"] == StoryStatus.APPROVED.value:
-        raise ConflictError(
-            "A história já foi aprovada: o LLM não altera histórias aprovadas. Edite os critérios manualmente.",
-            {"motivo": "historia_aprovada", "historia_id": story["id"]},
-        )
+SCOPES = ("auto", "desatualizados", "todos")
+PROPOSAL_NOTE = "Critérios de aceitação regenerados pela IA para uma história aprovada: aplicar exige aprovação."
 
 
-def _target(uow: UnitOfWork, container: Container, story: dict) -> CriteriaTarget:
+def _outdated(story: dict) -> list[dict]:
+    return [c for c in story["criterios_aceitacao"] if c.get("situacao") == OUTDATED]
+
+
+def plan(story: dict, scope: str = "auto", criterion_ids: list[int] | None = None) -> tuple[list[dict], list[dict]]:
+    """(critérios a substituir, critérios mantidos). ``auto``: os desatualizados, ou todos se não houver nenhum.
+
+    ``criterion_ids`` escolhe critérios específicos (regeneração individual)."""
+    current = story["criterios_aceitacao"]
+    if criterion_ids:
+        unknown = set(criterion_ids) - {c["criterio_id"] for c in current}
+        if unknown:
+            raise BusinessValidationError("Critérios não vigentes nesta história.", {"criterio_ids": sorted(unknown)})
+        replaced = [c for c in current if c["criterio_id"] in criterion_ids]
+    elif scope == "desatualizados" or (scope == "auto" and _outdated(story)):
+        replaced = _outdated(story)
+        if not replaced and scope == "desatualizados":
+            raise BusinessValidationError("A história não tem critérios desatualizados.", {"motivo": "sem_desatualizados"})
+    else:
+        replaced = list(current)
+    ids = {c["criterio_id"] for c in replaced}
+    return replaced, [c for c in current if c["criterio_id"] not in ids]
+
+
+def _target(uow: UnitOfWork, container: Container, story: dict, kept: list[dict] | None = None) -> CriteriaTarget:
     evidences = evidence_chunks(uow.evidences.list_by_story(story["id"]))
     related = related_for(uow, container, story["projeto_id"], story, {c["id"] for c in evidences})
-    return CriteriaTarget(f"H{story['id']}", story, evidences, related)
+    return CriteriaTarget(f"H{story['id']}", story, evidences, related, kept or [])
+
+
+def _require_no_pending_proposal(uow: UnitOfWork, story: dict) -> None:
+    pending = [s for s in uow.suggestions.list_pending_for_story(story["id"])
+               if s["tipo"] == SuggestionType.CRITERIA_REVIEW.value]
+    if pending:
+        raise ConflictError("Já há uma proposta de critérios pendente para esta história. Decida-a antes.",
+                            {"motivo": "proposta_pendente", "sugestao_id": pending[0]["id"]})
+
+
+def propose_criteria(uow: UnitOfWork, story: dict, outcome: CriteriaOutcome, kept: list[dict], replaced: list[dict],
+                     job_id: str | None = None) -> int:
+    """História aprovada: o LLM não escreve nela, então os critérios novos viram uma proposta pendente
+    (``revisao_criterios``), decidida pelo fluxo normal de aprovação (com checagem de desatualização)."""
+    now = utc_now_iso()
+    current = snapshot(story)
+    return uow.suggestions.insert({
+        "projeto_id": story["projeto_id"], "historia_id": story["id"], "tipo": SuggestionType.CRITERIA_REVIEW.value,
+        "justificativa": PROPOSAL_NOTE, "conteudo_atual": current,
+        "conteudo_proposto": {**current, "criterios_aceitacao": criteria_content(kept + outcome.criteria)},
+        "evidencias": outcome.new_evidences, "fontes": [], "status": SuggestionStatus.PENDING.value, "editada": 0,
+        "job_id": job_id, "versao_base": story["versao_atual"], "criado_em": now, "atualizado_em": now,
+        "detalhes": {
+            "criterios_substituidos": [_brief(c) for c in replaced], "criterios_mantidos": [_brief(c) for c in kept],
+            "criterios_novos": [c["criterio"] for c in outcome.criteria], "lacunas": outcome.gaps,
+        },
+    })
+
+
+def _brief(c: dict) -> dict:
+    return {"criterio_id": c.get("criterio_id"), "codigo": c.get("id"), "criterio": c["criterio"],
+            "situacao": c.get("situacao")}
 
 
 def _project_analysis(uow: UnitOfWork, project_id: int) -> str | None:
@@ -246,24 +304,48 @@ class CriteriaService:
         self.uow = uow
         self.container = container
 
-    def generate(self, story_id: int, author: str) -> dict:
+    def generate(self, story_id: int, author: str, scope: str = "auto", criterion_ids: list[int] | None = None) -> dict:
+        """Regenera os critérios (os desatualizados, os escolhidos ou todos). Os que continuam valendo vão ao prompt
+        como "já validados" e são mantidos. História aprovada → proposta pendente, sem alterar a história."""
         story = require_story(self.uow, story_id)
-        _require_not_approved(story)
-        target = _target(self.uow, self.container, story)
+        if story["status"] == StoryStatus.REJECTED.value:
+            raise ConflictError("A história foi desaprovada.", {"motivo": "historia_desaprovada"})
+        approved = story["status"] == StoryStatus.APPROVED.value
+        if approved:
+            _require_no_pending_proposal(self.uow, story)
+        replaced, kept = plan(story, scope, criterion_ids)
+        target = _target(self.uow, self.container, story, kept)
         outcomes, failures = generate_criteria(
             self.container, [target], _project_analysis(self.uow, story["projeto_id"])
         )
         if failures:
             raise ExternalServiceError(f"Falha ao gerar critérios: {failures[0]['erro']}", {"falhas": failures})
-        _apply_to_story(self.uow, story_id, outcomes[target.ref], author)
+        proposal_id = None
+        if approved:
+            proposal_id = propose_criteria(self.uow, story, outcomes[target.ref], kept, replaced)
+        else:
+            _apply_to_story(self.uow, story_id, outcomes[target.ref], author, kept)
         from app.services.stories import StoryService  # import local: evita ciclo services.stories ↔ criteria
+
+        return {**StoryService(self.uow).detail(story_id), "proposta_criterios_id": proposal_id}
+
+    def confirm(self, story_id: int, criterion_id: int) -> dict:
+        """O analista confirma que o critério continua válido para a versão atual (não cria versão)."""
+        story = require_story(self.uow, story_id)
+        if criterion_id not in {c["criterio_id"] for c in story["criterios_aceitacao"]}:
+            raise NotFoundError.for_entity("Critério vigente", criterion_id)
+        confirm_valid(self.uow, criterion_id, story["versao_atual"])
+        from app.services.stories import StoryService
 
         return StoryService(self.uow).detail(story_id)
 
 
 # -- Lote (job) ---------------------------------------------------------------
 def select_stories(uow: UnitOfWork, project_id: int, story_ids: list[int], replace: bool) -> tuple[list[dict], list[dict]]:
-    """(histórias a processar, ignoradas com motivo). Sem ids: todas as ativas não aprovadas do projeto."""
+    """(histórias a processar, ignoradas com motivo). Sem ids: todas as ativas do projeto.
+
+    Entram as histórias sem critérios, as com critérios desatualizados e, com ``replace``, as demais. Aprovadas
+    entram também (viram proposta), salvo se já tiverem uma proposta de critérios pendente."""
     if story_ids:
         stories = [s for s in (uow.stories.get(i) for i in story_ids) if s and s["projeto_id"] == project_id]
         missing = set(story_ids) - {s["id"] for s in stories}
@@ -272,12 +354,14 @@ def select_stories(uow: UnitOfWork, project_id: int, story_ids: list[int], repla
         stories, skipped = uow.stories.list_active(project_id), []
     selected = []
     for s in stories:
-        if s["status"] == StoryStatus.APPROVED.value:
-            skipped.append({"historia_id": s["id"], "codigo": s["codigo"], "motivo": "historia_aprovada"})
-        elif s["status"] == StoryStatus.REJECTED.value:
+        pending = s["status"] == StoryStatus.APPROVED.value and any(
+            p["tipo"] == SuggestionType.CRITERIA_REVIEW.value for p in uow.suggestions.list_pending_for_story(s["id"]))
+        if s["status"] == StoryStatus.REJECTED.value:
             skipped.append({"historia_id": s["id"], "codigo": s["codigo"], "motivo": "historia_desaprovada"})
-        elif s["criterios_aceitacao"] and not replace:
-            skipped.append({"historia_id": s["id"], "codigo": s["codigo"], "motivo": "ja_possui_criterios"})
+        elif pending:
+            skipped.append({"historia_id": s["id"], "codigo": s["codigo"], "motivo": "proposta_pendente"})
+        elif s["criterios_aceitacao"] and not _outdated(s) and not replace:
+            skipped.append({"historia_id": s["id"], "codigo": s["codigo"], "motivo": "criterios_validos"})
         else:
             selected.append(s)
     return selected, skipped
@@ -306,16 +390,23 @@ def run_criteria_generation(container: Container, job_id: str) -> None:
     try:
         with container.uow() as uow:
             stories, skipped = select_stories(uow, project_id, params["historia_ids"], params["substituir"])
-            targets = [_target(uow, container, s) for s in stories]
+            plans = {s["id"]: plan(s, "auto" if not params["substituir"] else "todos") for s in stories}
+            targets = [_target(uow, container, s, plans[s["id"]][1]) for s in stories]
             analysis = _project_analysis(uow, project_id)
-        ids = {f"H{s['id']}": s["id"] for s in stories}
+        by_ref = {f"H{s['id']}": s for s in stories}
+        ids = {ref: s["id"] for ref, s in by_ref.items()}
         updated: list[int] = []
+        proposals: list[int] = []
 
         def persist(batch: dict[str, CriteriaOutcome]) -> None:
             with container.uow() as uow:
                 for ref, outcome in batch.items():
-                    if _apply_to_story(uow, ids[ref], outcome, author) is not None:
-                        updated.append(ids[ref])
+                    story = by_ref[ref]
+                    replaced, kept = plans[story["id"]]
+                    if story["status"] == StoryStatus.APPROVED.value:
+                        proposals.append(propose_criteria(uow, uow.stories.get(story["id"]), outcome, kept, replaced, job_id))
+                    elif _apply_to_story(uow, story["id"], outcome, author, kept) is not None:
+                        updated.append(story["id"])
 
         _, failures = generate_criteria(container, targets, analysis, on_batch=persist)
         if targets and len(failures) == len(targets):
@@ -323,7 +414,8 @@ def run_criteria_generation(container: Container, job_id: str) -> None:
         failures = [{**f, "historia_id": ids[f["historia"]]} for f in failures]
         with container.uow() as uow:
             JobService(uow).mark(job_id, JobStatus.COMPLETED, result={
-                "historias_atualizadas": updated, "total": len(updated), "ignoradas": skipped, "falhas": failures,
+                "historias_atualizadas": updated, "total": len(updated), "propostas_criadas": proposals,
+                "ignoradas": skipped, "falhas": failures,
                 "versoes_prompt": prompts.prompt_versions(),
                 "mensagem": None if targets else "Nenhuma história elegível para gerar critérios.",
             })

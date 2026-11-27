@@ -147,7 +147,12 @@ CREATE TABLE IF NOT EXISTS criterios_aceitacao (
     status TEXT NOT NULL CHECK (status IN ('vigente', 'substituido')),
     substituido_na_versao INTEGER,
     criado_em TEXT NOT NULL,
-    atualizado_em TEXT NOT NULL
+    atualizado_em TEXT NOT NULL,
+    -- Validade em relação à HU (Milestone 5): 'valido' ou 'desatualizado' (a HU mudou depois do critério).
+    situacao TEXT NOT NULL DEFAULT 'valido',
+    validado_na_versao INTEGER,
+    desatualizado_na_versao INTEGER,
+    motivo_situacao TEXT
 );
 CREATE INDEX IF NOT EXISTS ix_criterios_historia ON criterios_aceitacao(historia_id, status, posicao);
 
@@ -217,7 +222,7 @@ CREATE TABLE IF NOT EXISTS sugestoes_atualizacao (
     historia_id INTEGER REFERENCES historias(id) ON DELETE CASCADE,
     -- confirmacao | complementacao | modificacao | contradicao | nova_necessidade (ANALISE_IMPACTO_FONTES);
     -- complementa | contradiz | novo_requisito: sugestões gravadas antes do Milestone 3
-    tipo TEXT NOT NULL CHECK (tipo IN ('complementa', 'contradiz', 'novo_requisito', 'confirmacao', 'complementacao', 'modificacao', 'contradicao', 'nova_necessidade')),
+    tipo TEXT NOT NULL CHECK (tipo IN ('complementa', 'contradiz', 'novo_requisito', 'confirmacao', 'complementacao', 'modificacao', 'contradicao', 'nova_necessidade', 'revisao_criterios')),
     justificativa TEXT NOT NULL,
     conteudo_atual TEXT,
     conteudo_proposto TEXT NOT NULL,

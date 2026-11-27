@@ -110,6 +110,8 @@ def test_legacy_criteria_move_to_their_own_table(tmp_path):
             ("CA01", 1, "PDF", "Dado uma turma, quando emitir, então gera o PDF.", None, "legado", 2, "vigente"),
             ("CA02", 2, "Critério 2", "Dado x, quando y, então z.", "x", "ia", 2, "vigente"),  # vazio descartado
         ]
+        situations = conn.execute("SELECT DISTINCT situacao, validado_na_versao FROM criterios_aceitacao").fetchall()
+        assert [tuple(r) for r in situations] == [("valido", 2)]  # critérios migrados valem na versão atual
         versions = dict(conn.execute("SELECT numero, criterio_ids FROM versoes_historia").fetchall())
         assert versions == {1: "[]", 2: "[1, 2]"}  # só a versão atual tinha esses critérios com certeza
         legacy = conn.execute("SELECT criterios_aceitacao FROM historias").fetchone()[0]

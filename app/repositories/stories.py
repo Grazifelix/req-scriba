@@ -15,7 +15,9 @@ def criterion_item(row: dict[str, Any]) -> dict[str, Any]:
     item = {"id": row["codigo"], "criterio_id": row["id"], "titulo": row["titulo"], "criterio": row["criterio"]}
     item.update({k: row[k] for k in ("dado", "quando", "entao") if row[k] is not None})
     item.update({k: row[k] or [] for k in ("fontes", "informacoes_ausentes", "afirmacoes_sem_evidencia")})
-    item.update({"origem": row["origem"], "versao_historia": row["versao_historia"], "status": row["status"]})
+    item.update({"origem": row["origem"], "versao_historia": row["versao_historia"], "status": row["status"],
+                 "situacao": row["situacao"], "validado_na_versao": row["validado_na_versao"],
+                 "desatualizado_na_versao": row["desatualizado_na_versao"], "motivo_situacao": row["motivo_situacao"]})
     return item
 
 

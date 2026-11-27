@@ -1,4 +1,4 @@
-versao: 1.0
+versao: 1.1
 uso: geração de critérios de aceitação para histórias já formuladas (não altera as histórias)
 placeholders: $fontes $analise $historias
 ---
@@ -30,6 +30,8 @@ resultados verificáveis que permitem avaliar se a necessidade da história foi 
 - Trechos marcados como "relacionado" nas fontes podem trazer regras e comportamentos da mesma
   funcionalidade; use-os somente se tratarem da funcionalidade da história.
 - A ANALISE DO PROJETO dá contexto (requisitos de negócio e termos do domínio); ela NÃO é evidência.
+- Se a história listar "Critérios já validados", eles continuam valendo: escreva SOMENTE os critérios que
+  faltam, sem repetir nem reescrever os validados.
 
 ## ETAPA 1: Interpretar cada história
 

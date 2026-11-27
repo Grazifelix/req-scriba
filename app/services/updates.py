@@ -539,7 +539,9 @@ class UpdateService:
             changed = None
             if suggestion["tipo"] != SuggestionType.CONFIRMATION.value or suggestion["editada"]:
                 fields = self._fields_to_apply(suggestion, story, accept_outdated)
-                changed = apply_content_change(self.uow, story, fields) if fields else None
+                hints = {c["criterio_id"]: c["acao_recomendada"]
+                         for c in (suggestion.get("detalhes") or {}).get("criterios_afetados", [])}
+                changed = apply_content_change(self.uow, story, fields, criteria_hints=hints) if fields else None
             add_evidences(self.uow, story["id"], suggestion["evidencias"], "atualizacao")
             if changed:
                 values["versao_aplicada"] = create_version(

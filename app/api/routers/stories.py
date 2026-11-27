@@ -12,7 +12,7 @@ from app.db.unit_of_work import UnitOfWork
 from app.domain.enums import StoryStatus
 from app.schemas.common import ERROR_RESPONSES
 from app.schemas.stories import (
-    CriteriaGenerationRequest, EvidenceAuditRequest, EvidenceAuditReview, EvidenceList, GenerationRequest, RewriteApply, RewriteResult, StoryCreate, StoryList, StoryOut, StoryUpdate,
+    CriteriaGenerationRequest, CriteriaRegenerationRequest, EvidenceAuditRequest, EvidenceAuditReview, EvidenceList, GenerationRequest, RewriteApply, RewriteResult, StoryCreate, StoryList, StoryOut, StoryUpdate,
     TraceabilityOut, VersionList, VersionOut,
 )
 from app.schemas.workflow import JobOut
@@ -85,22 +85,36 @@ def apply_rewrite(historia_id: int, body: RewriteApply, uow: UnitOfWork = Depend
 
 
 @router.post("/historias/{historia_id}/criterios/gerar", response_model=StoryOut, tags=["Critérios de aceitação"],
-             summary="Gerar critérios de aceitação de uma história",
-             description="Etapa GERACAO_CRITERIOS_ACEITACAO para uma história já gravada, a partir das evidências "
-                         "dela e de trechos relacionados. A história não é alterada; os critérios substituem os "
-                         "atuais numa nova versão (origem `geracao_criterios_ia`), e a versão anterior é preservada. "
-                         "Sem base nas fontes, nenhum critério é inventado: a lacuna fica em `informacoes_ausentes`. "
-                         "História aprovada → 409 (o LLM não altera histórias aprovadas); falha do LLM → 502.")
-def generate_criteria(historia_id: int, uow: UnitOfWork = Depends(get_uow),
-                      container: Container = Depends(get_container), actor: str = Depends(get_actor)):
-    return CriteriaService(uow, container).generate(historia_id, actor)
+             summary="Gerar ou regerar critérios de aceitação de uma história",
+             description="Etapa GERACAO_CRITERIOS_ACEITACAO a partir das evidências da história e de trechos "
+                         "relacionados. `escopo` auto (padrão): regera os critérios desatualizados, ou todos se não "
+                         "houver; `criterio_ids` regera só os escolhidos. Os que continuam valendo vão ao prompt como "
+                         "já validados e são mantidos; os substituídos ficam preservados. A história não é alterada; "
+                         "os critérios mudam numa nova versão (origem `geracao_criterios_ia`). História aprovada: vira "
+                         "uma proposta pendente `revisao_criterios` (`proposta_criterios_id`), porque o LLM não altera "
+                         "histórias aprovadas (409 se já houver uma pendente). Falha do LLM → 502.")
+def generate_criteria(historia_id: int, body: Optional[CriteriaRegenerationRequest] = None,
+                      uow: UnitOfWork = Depends(get_uow), container: Container = Depends(get_container),
+                      actor: str = Depends(get_actor)):
+    body = body or CriteriaRegenerationRequest()
+    return CriteriaService(uow, container).generate(historia_id, actor, body.escopo, body.criterio_ids or None)
+
+
+@router.post("/historias/{historia_id}/criterios/{criterio_id}/confirmar", response_model=StoryOut,
+             tags=["Critérios de aceitação"], summary="Confirmar que um critério continua válido",
+             description="Depois de uma mudança na história, o critério fica desatualizado até ser confirmado ou "
+                         "regerado. Confirmar o marca válido na versão atual (não cria versão).")
+def confirm_criterion(historia_id: int, criterio_id: int, uow: UnitOfWork = Depends(get_uow),
+                      container: Container = Depends(get_container)):
+    return CriteriaService(uow, container).confirm(historia_id, criterio_id)
 
 
 @router.post("/projetos/{projeto_id}/criterios/gerar", response_model=JobOut, status_code=status.HTTP_202_ACCEPTED,
              tags=["Critérios de aceitação"], summary="Gerar critérios de aceitação em lote",
              description="Cria um job (`geracao_criterios`) que processa várias histórias por chamada ao LLM e grava "
-                         "cada lote assim que ele termina. Histórias aprovadas ou desaprovadas são ignoradas, assim "
-                         "como as que já têm critérios (a menos que `substituir` seja true).")
+                         "cada lote assim que ele termina. Entram as histórias sem critérios e as com critérios "
+                         "desatualizados (só esses são regerados); com `substituir`, também as demais. Histórias "
+                         "aprovadas geram propostas `revisao_criterios`; desaprovadas são ignoradas.")
 def generate_criteria_batch(
     projeto_id: int, background: BackgroundTasks, body: Optional[CriteriaGenerationRequest] = None,
     uow: UnitOfWork = Depends(get_uow), container: Container = Depends(get_container), actor: str = Depends(get_actor),
