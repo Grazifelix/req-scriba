@@ -77,10 +77,11 @@ class Settings:
     generation_context_pass: bool = field(default_factory=lambda: _env_bool("GENERATION_CONTEXT_PASS", True))
     generation_context_chars: int = field(default_factory=lambda: _env_int("GENERATION_CONTEXT_CHARS", 1200))
     generation_consolidation: bool = field(default_factory=lambda: _env_bool("GENERATION_CONSOLIDATION", True))
-    # Etapa de critérios de aceitação dentro do job de geração (desligada: gere depois, por história ou em lote)
-    generation_criteria: bool = field(default_factory=lambda: _env_bool("GENERATION_CRITERIA", True))
-    # Auditoria semântica das evidências (VALIDACAO_EVIDENCIAS) ao fim do job de geração
-    generation_evidence_audit: bool = field(default_factory=lambda: _env_bool("GENERATION_EVIDENCE_AUDIT", True))
+    # Etapa de critérios de aceitação dentro do job de geração. Padrão desligado: o job gera só as US e os critérios
+    # são gerados sob demanda na tela da história (ou em lote)
+    generation_criteria: bool = field(default_factory=lambda: _env_bool("GENERATION_CRITERIA", False))
+    # Auditoria semântica das evidências (VALIDACAO_EVIDENCIAS) ao fim do job de geração. Padrão desligado: sob demanda
+    generation_evidence_audit: bool = field(default_factory=lambda: _env_bool("GENERATION_EVIDENCE_AUDIT", False))
     # Análise de novas fontes: histórias mais próximas por embeddings para cada trecho novo (posição no ranking),
     # máximo de histórias por chamada e evidências atuais enviadas por história
     impact_top_stories: int = field(default_factory=lambda: _env_int("IMPACT_TOP_STORIES", 3))

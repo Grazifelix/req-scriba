@@ -28,7 +28,10 @@ DOC_TEXT = (
 
 @pytest.fixture
 def container(tmp_path: Path) -> Container:
-    settings = Settings(data_dir=tmp_path / "data")
+    # Em produção o job de geração só gera as US (critérios e auditoria sob demanda). Aqui as duas etapas ficam
+    # ligadas porque muitos cenários usam o job para montar histórias já com critérios e auditoria; o padrão
+    # desligado é coberto em test_services_criteria.py.
+    settings = Settings(data_dir=tmp_path / "data", generation_criteria=True, generation_evidence_audit=True)
     settings.ensure_dirs()
     db = Database(settings.db_path)
     db.initialize()

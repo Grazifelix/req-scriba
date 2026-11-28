@@ -317,8 +317,12 @@ frontend usa esses campos para mostrar em quais fontes a IA se baseou.
 - **Pipeline do job de geração:** `preparacao` → `geracao_us` → `consolidacao_us` → `validacao_us` →
   `geracao_criterios` → `validacao_criterios` → `persistencia` → `auditoria_evidencias`. Cada etapa registra `status`
   (`em_andamento | concluida | erro | ignorada`) e `duracao_s` em `resultado.etapas`, gravados a cada início e fim de etapa (a interface mostra a etapa atual) e mantidos quando o job falha. A etapa de
-  critérios não é fatal: se falhar, as HU são gravadas sem critérios e com a lacuna. A v1 da HU já nasce com os
-  critérios. `REQSCRIBA_GENERATION_CRITERIA=false` pula a etapa (gere depois, por HU ou em lote).
+  critérios não é fatal: se falhar, as HU são gravadas sem critérios e com a lacuna. **Por padrão o job gera só as
+  US:** `geracao_criterios` e `auditoria_evidencias` ficam `ignorada`, a v1 nasce sem critérios (lacuna "Critérios de
+  aceitação ainda não gerados…") e o analista gera critérios (`POST /historias/{id}/criterios/gerar`, ou em lote) e
+  a auditoria (`POST /historias/{id}/auditoria-evidencias`) quando quiser, na tela da HU.
+  `REQSCRIBA_GENERATION_CRITERIA=true` / `REQSCRIBA_GENERATION_EVIDENCE_AUDIT=true` voltam a executá-las no job
+  (nesse caso a v1 já nasce com os critérios).
 - **Rastreabilidade (Milestone 2):** cada trecho (`trechos_fonte`) tem id permanente, fonte (`tipo_fonte`,
   `fonte_id`, `nome_arquivo`) e localização; `GET /trechos/{id}` devolve a fonte original e onde o trecho é usado.
   Evidência = cópia imutável do trecho na HU, com `afirmacoes_sustentadas` (perfil, funcionalidade, beneficio).
@@ -489,9 +493,9 @@ Fakes: `FakeLLM` (roteia pelo marcador `### TAREFA:` do prompt), `FakeTranscribe
 | `REQSCRIBA_GENERATION_CONTEXT_PASS` | `true` (passada de contexto prévia: análise das fontes e novas fontes sem análise aprovada) |
 | `REQSCRIBA_GENERATION_CONTEXT_CHARS` | `1200` (limite do bloco de contexto nos prompts) |
 | `REQSCRIBA_GENERATION_CONSOLIDATION` | `true` (passada de consolidação) |
-| `REQSCRIBA_GENERATION_CRITERIA` | `true` (etapa de critérios de aceitação dentro do job de geração) |
+| `REQSCRIBA_GENERATION_CRITERIA` | `false` (etapa de critérios de aceitação dentro do job de geração; padrão: sob demanda na tela da HU) |
 | `REQSCRIBA_CRITERIA_RELATED_CHUNKS` | `2` (trechos relacionados por HU no prompt de critérios; `0` desliga) |
-| `REQSCRIBA_GENERATION_EVIDENCE_AUDIT` | `true` (auditoria semântica das evidências ao fim do job de geração) |
+| `REQSCRIBA_GENERATION_EVIDENCE_AUDIT` | `false` (auditoria semântica das evidências ao fim do job de geração; padrão: sob demanda na tela da HU) |
 | `REQSCRIBA_IMPACT_TOP_STORIES` | `3` (HU mais próximas por embeddings para cada trecho novo; `0` desliga o sinal) |
 | `REQSCRIBA_IMPACT_MAX_STORIES` | `12` (HU candidatas por chamada de ANALISE_IMPACTO_FONTES) |
 | `REQSCRIBA_IMPACT_EVIDENCES_PER_STORY` | `3` (evidências atuais de cada HU enviadas ao prompt) |

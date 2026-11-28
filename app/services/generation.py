@@ -221,7 +221,7 @@ def _criteria_step(container: Container, stages: StageLog, project_id: int, cand
         stages.skip("geracao_criterios", "nenhuma história nova")
         return []
     if not container.settings.generation_criteria:
-        stages.skip("geracao_criterios", "desligada (REQSCRIBA_GENERATION_CRITERIA)")
+        stages.skip("geracao_criterios", "sob demanda na tela da história (REQSCRIBA_GENERATION_CRITERIA)")
         _without_criteria(candidates, NOT_GENERATED)
         return []
     info: dict[str, Any] = {"falhas": []}
@@ -240,7 +240,7 @@ def _audit_step(container: Container, stages: StageLog, created: list[int], job_
         stages.skip("auditoria_evidencias", "nenhuma história nova")
         return None
     if not container.settings.generation_evidence_audit:
-        stages.skip("auditoria_evidencias", "desligada (REQSCRIBA_GENERATION_EVIDENCE_AUDIT)")
+        stages.skip("auditoria_evidencias", "sob demanda na tela da história (REQSCRIBA_GENERATION_EVIDENCE_AUDIT)")
         return None
     info: dict[str, Any] | None = None
     with stages.run("auditoria_evidencias", fatal=False) as stage:
@@ -254,7 +254,10 @@ def _audit_step(container: Container, stages: StageLog, created: list[int], job_
 
 def run_generation(container: Container, job_id: str) -> None:
     """Job de geração: preparação → GERACAO_US_QUS → consolidação das US → validação estrutural das US →
-    GERACAO_CRITERIOS_ACEITACAO → validação estrutural dos critérios → persistência.
+    GERACAO_CRITERIOS_ACEITACAO → validação estrutural dos critérios → persistência → VALIDACAO_EVIDENCIAS.
+
+    Por padrão o job gera só as US: critérios e auditoria ficam ``ignorada`` e são pedidos depois, na tela da
+    história (``REQSCRIBA_GENERATION_CRITERIA`` / ``REQSCRIBA_GENERATION_EVIDENCE_AUDIT`` os religam no job).
 
     Cada etapa registra status e duração em ``resultado.etapas``. A falha dos critérios não perde as histórias:
     elas são gravadas sem critérios e com a lacuna sinalizada. Chamadas ao LLM ficam fora das transações."""

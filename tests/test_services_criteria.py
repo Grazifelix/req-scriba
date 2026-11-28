@@ -7,6 +7,7 @@ import re
 import pytest
 from fastapi.testclient import TestClient
 
+from app.core.config import Settings
 from app.core.errors import ConflictError, ExternalServiceError
 from app.domain.enums import StoryStatus
 from app.domain.traceability import CRITERION_WITHOUT_EVIDENCE
@@ -231,14 +232,21 @@ def test_story_missing_from_criteria_answer_is_flagged(container, project_id, au
     assert any("não devolveu critérios" in g["descricao"] for g in second["informacoes_ausentes"])
 
 
-def test_criteria_stage_can_be_disabled(container, project_id, audio_id):
+def test_generation_defaults_to_stories_only():
+    settings = Settings()
+    assert settings.generation_criteria is False and settings.generation_evidence_audit is False
+
+
+def test_generation_job_creates_only_stories_when_criteria_and_audit_are_off(container, project_id, audio_id):
     container.settings.generation_criteria = False
+    container.settings.generation_evidence_audit = False
     job = generate(container, project_id, [audio_id])
-    stage = next(s for s in job["resultado"]["etapas"] if s["etapa"] == "geracao_criterios")
-    assert stage["status"] == "ignorada"
+    stages = {s["etapa"]: s["status"] for s in job["resultado"]["etapas"]}
+    assert stages["geracao_criterios"] == "ignorada" and stages["auditoria_evidencias"] == "ignorada"
     assert not container.llm.prompts_for("GERACAO_CRITERIOS_ACEITACAO")
+    assert not container.llm.prompts_for("VALIDACAO_EVIDENCIAS")
     story = detail(container, job["resultado"]["historias_criadas"][0])
-    assert story["criterios_aceitacao"] == []
+    assert story["criterios_aceitacao"] == [] and story["versao_atual"] == 1
     assert {"elemento": "criterios_aceitacao", "descricao": NOT_GENERATED} in story["informacoes_ausentes"]
 
 
